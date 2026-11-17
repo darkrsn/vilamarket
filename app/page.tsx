@@ -80,7 +80,7 @@ export default function VilaMarketApp() {
 
     const cpfLimpo = cpf.replace(/\D/g, '');
     const waLimpo = whatsapp.replace(/\D/g, '');
-    const emailTecnico = `user_${cpfLimpo}@vilamarket.local`;
+    const emailTecnico = `user_${cpfLimpo}@vilamarket.com.br`;
     const senhaAuth = `VM#${pin}#${cpfLimpo.slice(-4)}`;
 
     const unidadeObj = unidades.find((u) => u.id === unidadeId);
