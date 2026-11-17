@@ -142,24 +142,43 @@ export default function VilaMarketApp() {
   }
 
   async function confirmarCodigoCadastro(e: React.FormEvent) {
-    e.preventDefault();
-    setCarregando(true);
-    setMensagem(null);
+  e.preventDefault();
+  setCarregando(true);
+  setMensagem(null);
 
-    const { data, error } = await supabase.rpc('confirmar_cadastro_whatsapp', {
-      p_cpf: cpf.replace(/\D/g, ''),
-      p_codigo: codigoWa,
-    });
+  const cpfLimpo = cpf.replace(/\D/g, '');
 
+  // 1. Confirma o código de 6 dígitos do WhatsApp no banco
+  const { data, error } = await supabase.rpc('confirmar_cadastro_whatsapp', {
+    p_cpf: cpfLimpo,
+    p_codigo: codigoWa,
+  });
+
+  if (error || !data?.sucesso) {
     setCarregando(false);
-    if (error || !data?.sucesso) {
-      setMensagem({ tipo: 'erro', texto: error?.message || data?.mensagem });
-      return;
-    }
+    setMensagem({ tipo: 'erro', texto: error?.message || data?.mensagem });
+    return;
+  }
 
+  // 2. Carrega os dados do perfil recém-ativado para entrar direto na Home
+  const { data: loginData, error: loginError } = await supabase.rpc('validar_cpf_pin', {
+    p_cpf: cpfLimpo,
+    p_pin: pin,
+  });
+
+  setCarregando(false);
+
+  if (loginError || !loginData?.sucesso) {
     setMensagem({ tipo: 'sucesso', texto: data.mensagem });
     setAba('login');
+    return;
   }
+
+  // 3. Entra logado direto na tela Home (painel)
+  setUsuarioLogado(loginData);
+  setMensagem(null);
+  setAba('painel');
+}
 
   async function pedirCodigoResetPin() {
     setCarregando(true);
