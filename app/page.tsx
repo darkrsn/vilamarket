@@ -7,6 +7,25 @@ import { supabase } from '@/lib/supabase';
 const TEMPO_SESSAO_MS = 7 * 24 * 60 * 60 * 1000;
 const CHAVE_STORAGE = 'vilamarket_sessao_v1';
 
+const CATEGORIAS_CLASSIFICADOS = [
+  'Todos',
+  'Comida & Doces',
+  'Artesanato & Presentes',
+  'Eletrônicos & Games',
+  'Móveis & Decoração',
+  'Serviços & Aulas',
+  'Infantil & Brinquedos',
+  'Pet & Acessórios',
+  'Outros / Desapegos',
+];
+
+const CONDICOES_ANUNCIO = [
+  'Novo',
+  'Seminovo / Usado',
+  'Sob Encomenda / Artesanal',
+  'Prestação de Serviço',
+];
+
 interface StatusQualidadeFoto {
   aprovada: boolean;
   luzOk: boolean;
@@ -15,9 +34,37 @@ interface StatusQualidadeFoto {
   mensagem: string;
 }
 
+// Formata a primeira letra de cada palavra em maiúscula (preservando preposições comuns)
+function formatarNomeTitleCase(valor: string): string {
+  const excecoes = new Set(['da', 'de', 'do', 'das', 'dos', 'e']);
+  return valor
+    .toLowerCase()
+    .split(' ')
+    .map((palavra, indice) => {
+      if (!palavra) return '';
+      if (indice > 0 && excecoes.has(palavra)) return palavra;
+      return palavra.charAt(0).toUpperCase() + palavra.slice(1);
+    })
+    .join(' ');
+}
+
+function formatarMoedaInput(valorDigitado: string): string {
+  const apenasDigitos = valorDigitado.replace(/\D/g, '');
+  if (!apenasDigitos) return '';
+  const numero = parseInt(apenasDigitos, 10) / 100;
+  return numero.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function converterMoedaParaNumero(valorFormatado: string): number {
+  if (!valorFormatado) return 0;
+  const limpo = valorFormatado.replace(/\./g, '').replace(',', '.');
+  const num = parseFloat(limpo);
+  return isNaN(num) ? 0 : num;
+}
+
 export default function VilaMarketApp() {
   const [aba, setAba] = useState<'login' | 'cadastro' | 'confirmar_wa' | 'esqueci_pin' | 'painel'>('login');
-  const [abaInferior, setAbaInferior] = useState<'inicio' | 'mural' | 'perfil' | 'admin'>('inicio');
+  const [abaInferior, setAbaInferior] = useState<'inicio' | 'mural' | 'ajuda' | 'perfil' | 'admin'>('inicio');
   const [unidades, setUnidades] = useState<any[]>([]);
   const [condominioId, setCondominioId] = useState<string>('');
   const [mensagem, setMensagem] = useState<{ tipo: 'erro' | 'sucesso'; texto: string } | null>(null);
@@ -45,12 +92,12 @@ export default function VilaMarketApp() {
   const [codigoWa, setCodigoWa] = useState('');
   const [novoPin, setNovoPin] = useState('');
 
-  // Estados dos Modais da Dashboard (Selfie, Alterar PIN, Extrato, Dependentes e Pix)
+  // Estados dos Modais da Dashboard
   const [modalAtivo, setModalAtivo] = useState<
-    null | 'selfie' | 'pin' | 'extrato' | 'novo_dependente' | 'pix_dependente'
+    null | 'selfie' | 'pin' | 'extrato' | 'novo_dependente' | 'pix_dependente' | 'novo_anuncio'
   >(null);
 
-  // 1. Estados Modal Selfie + Análise de Qualidade em Tempo Real (Luz, Enquadramento e Detalhes)
+  // 1. Estados Modal Selfie + Análise de Qualidade
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const intervaloAnaliseRef = useRef<NodeJS.Timeout | null>(null);
   const [streamCamera, setStreamCamera] = useState<MediaStream | null>(null);
@@ -72,6 +119,7 @@ export default function VilaMarketApp() {
   // 3. Estados Extrato e Dependentes
   const [extratoLista, setExtratoLista] = useState<any[]>([]);
   const [dependentesLista, setDependentesLista] = useState<any[]>([]);
+  const [dependentesSelfiesMap, setDependentesSelfiesMap] = useState<Record<string, string>>({});
 
   // 4. Estados Cadastro de Dependente (Mínimo 12 anos)
   const [depNome, setDepNome] = useState('');
@@ -81,16 +129,49 @@ export default function VilaMarketApp() {
   const [depSelfieBase64, setDepSelfieBase64] = useState<string | null>(null);
   const [aceiteLgpdDependente, setAceiteLgpdDependente] = useState(false);
 
-  // 5. Estados Recarga Pix Dependente (Com trava de PIN para ações financeiras)
+  // 5. Estados Recarga Pix Dependente
   const [dependenteSelecionado, setDependenteSelecionado] = useState<any>(null);
   const [valorPix, setValorPix] = useState('20.00');
   const [pixCopiaECola, setPixCopiaECola] = useState('');
   const [pinConfirmacaoPix, setPinConfirmacaoPix] = useState('');
 
-  // 6. Estados Mural / Classificados
+  // 6. Estados Mural & Classificados
   const [subAbaMural, setSubAbaMural] = useState<'avisos' | 'classificados'>('avisos');
+  const [avisosLista, setAvisosLista] = useState<any[]>([]);
+  const [classificadosLista, setClassificadosLista] = useState<any[]>([]);
+  const [filtroCategoria, setFiltroCategoria] = useState('Todos');
+  const [buscaClassificados, setBuscaClassificados] = useState('');
+  const [somenteMeusAnuncios, setSomenteMeusAnuncios] = useState(false);
 
-  // Restaura o login salvo no navegador ao abrir ou apertar F5
+  // Formulário Novo Anúncio Classificados
+  const [anuncioTitulo, setAnuncioTitulo] = useState('');
+  const [anuncioTipo, setAnuncioTipo] = useState('Comida & Doces');
+  const [anuncioCondicao, setAnuncioCondicao] = useState('Novo');
+  const [anuncioPreco, setAnuncioPreco] = useState('');
+  const [anuncioDescricao, setAnuncioDescricao] = useState('');
+  const [anuncioWhatsapp, setAnuncioWhatsapp] = useState('');
+  const [anuncioFotoFile, setAnuncioFotoFile] = useState<File | null>(null);
+  const [anuncioFotoPreview, setAnuncioFotoPreview] = useState<string | null>(null);
+
+  // 7. Estados Painel Admin Completo
+  const [adminSecao, setAdminSecao] = useState<'moradores' | 'classificados' | 'mural'>('moradores');
+  const [adminMoradores, setAdminMoradores] = useState<any[]>([]);
+  const [adminBuscaMorador, setAdminBuscaMorador] = useState('');
+  const [adminFiltroStatus, setAdminFiltroStatus] = useState<'todos' | 'aprovado' | 'bloqueado' | 'sem_selfie'>('todos');
+  const [adminEditandoMorador, setAdminEditandoMorador] = useState<any | null>(null);
+  const [adminEditNome, setAdminEditNome] = useState('');
+  const [adminEditWhatsapp, setAdminEditWhatsapp] = useState('');
+  const [adminEditUnidade, setAdminEditUnidade] = useState('');
+  const [adminEditStatus, setAdminEditStatus] = useState('aprovado');
+  const [adminFotoAmpliadaUrl, setAdminFotoAmpliadaUrl] = useState<string | null>(null);
+
+  // Admin: Criar / Editar Aviso do Mural
+  const [adminAvisoEditId, setAdminAvisoEditId] = useState<string | null>(null);
+  const [adminAvisoTitulo, setAdminAvisoTitulo] = useState('');
+  const [adminAvisoConteudo, setAdminAvisoConteudo] = useState('');
+  const [adminAvisoFotoFile, setAdminAvisoFotoFile] = useState<File | null>(null);
+  const [adminAvisoFotoPreview, setAdminAvisoFotoPreview] = useState<string | null>(null);
+
   useEffect(() => {
     restaurarSessaoSalva();
     return () => pararAnaliseCamera();
@@ -102,8 +183,15 @@ export default function VilaMarketApp() {
     }
     if (aba === 'painel' && usuarioLogado?.perfil_id) {
       carregarDadosDashboard();
+      carregarMuralEClassificados();
     }
   }, [aba, usuarioLogado?.perfil_id]);
+
+  useEffect(() => {
+    if (aba === 'painel' && abaInferior === 'admin' && (perfilDetalhes?.role === 'admin' || usuarioLogado?.role === 'admin')) {
+      carregarDadosAdmin();
+    }
+  }, [aba, abaInferior]);
 
   // =========================================================================
   // MOTOR DE ANÁLISE BIOMÉTRICA REAL (ENQUADRAMENTO OVAL + LUZ + DETALHES)
@@ -134,7 +222,6 @@ export default function VilaMarketApp() {
       };
     }
 
-    // Recorte central 1:1 idêntico à captura final
     const menorLado = Math.min(video.videoWidth, video.videoHeight);
     const sx = (video.videoWidth - menorLado) / 2;
     const sy = (video.videoHeight - menorLado) / 2;
@@ -143,7 +230,6 @@ export default function VilaMarketApp() {
     const imgData = ctx.getImageData(0, 0, tamanho, tamanho).data;
     const brilhoMatriz = new Float32Array(tamanho * tamanho);
 
-    // Guia oval visual na tela (centro 50%, raios 26% x 35%)
     const cx = tamanho * 0.5;
     const cy = tamanho * 0.5;
     const rx = tamanho * 0.26;
@@ -152,10 +238,9 @@ export default function VilaMarketApp() {
     let somaBrilhoOval = 0;
     let pixelsDentroOval = 0;
 
-    // Faixas verticais dentro do eixo central do rosto (x entre 35% e 65%)
-    let peleFaixaTesta = 0, totalFaixaTesta = 0;     // y: 22% a 36%
-    let peleFaixaMeio = 0, totalFaixaMeio = 0;       // y: 36% a 56%
-    let peleFaixaQueixo = 0, totalFaixaQueixo = 0;   // y: 56% a 76%
+    let peleFaixaTesta = 0, totalFaixaTesta = 0;
+    let peleFaixaMeio = 0, totalFaixaMeio = 0;
+    let peleFaixaQueixo = 0, totalFaixaQueixo = 0;
     let peleForaOval = 0, totalForaOval = 0;
 
     let somaX = 0;
@@ -172,7 +257,6 @@ export default function VilaMarketApp() {
         const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
         brilhoMatriz[y * tamanho + x] = lum;
 
-        // Detecção de pele facial
         const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
         const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
         const ehPele =
@@ -198,7 +282,6 @@ export default function VilaMarketApp() {
           if (ehPele) peleForaOval++;
         }
 
-        // Análise em faixas horizontais no miolo do oval (x: 35% a 65%)
         if (x >= tamanho * 0.35 && x <= tamanho * 0.65) {
           if (y >= tamanho * 0.22 && y < tamanho * 0.36) {
             totalFaixaTesta++;
@@ -212,7 +295,6 @@ export default function VilaMarketApp() {
           }
         }
 
-        // Centro de gravidade apenas na área do rosto (y entre 16% e 78%)
         if (ehPele && y >= tamanho * 0.16 && y <= tamanho * 0.78 && x >= tamanho * 0.22 && x <= tamanho * 0.78) {
           somaX += x;
           somaY += y;
@@ -223,7 +305,6 @@ export default function VilaMarketApp() {
 
     const mediaBrilho = somaBrilhoOval / Math.max(1, pixelsDentroOval);
 
-    // 1. Checagem de Iluminação
     if (mediaBrilho < 55) {
       return {
         aprovada: false,
@@ -243,7 +324,6 @@ export default function VilaMarketApp() {
       };
     }
 
-    // 2. Nitidez (Laplaciano) dentro do oval
     let contrasteOval = 0;
     let countContraste = 0;
     for (let y = 2; y < tamanho - 2; y++) {
@@ -342,12 +422,11 @@ export default function VilaMarketApp() {
   }
 
   // =========================================================================
-  // FUNÇÕES DE STORAGE PRIVADO E SESSÃO (CONFORMIDADE LGPD + CACHE RÁPIDO)
+  // FUNÇÕES DE STORAGE E SESSÃO
   // =========================================================================
   async function gerarUrlTemporariaSelfie(caminhoOuBase64: string | null): Promise<string | null> {
     if (!caminhoOuBase64) return null;
-
-    if (caminhoOuBase64.startsWith('data:image')) {
+    if (caminhoOuBase64.startsWith('data:image') || caminhoOuBase64.startsWith('http')) {
       return caminhoOuBase64;
     }
 
@@ -360,9 +439,7 @@ export default function VilaMarketApp() {
           return url;
         }
       }
-    } catch {
-      // Ignora erro de sessionStorage
-    }
+    } catch {}
 
     const { data, error } = await supabase.storage
       .from('selfies')
@@ -375,9 +452,7 @@ export default function VilaMarketApp() {
         chaveCache,
         JSON.stringify({ url: data.signedUrl, expiraEm: Date.now() + 8 * 60 * 1000 })
       );
-    } catch {
-      // Ignora erro de sessionStorage
-    }
+    } catch {}
 
     return data.signedUrl;
   }
@@ -401,6 +476,23 @@ export default function VilaMarketApp() {
     return caminhoArquivo;
   }
 
+  async function enviarFotoPublicaComunidade(file: File, pasta: 'classificados' | 'mural'): Promise<string> {
+    const ext = file.name.split('.').pop() || 'jpg';
+    const caminho = `${pasta}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+
+    const { error } = await supabase.storage.from('comunidade').upload(caminho, file, {
+      contentType: file.type || 'image/jpeg',
+      upsert: true,
+    });
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    const { data } = supabase.storage.from('comunidade').getPublicUrl(caminho);
+    return data.publicUrl;
+  }
+
   function salvarSessaoNoNavegador(dadosUsuario: any) {
     try {
       const sessao = {
@@ -408,17 +500,13 @@ export default function VilaMarketApp() {
         expiraEm: Date.now() + TEMPO_SESSAO_MS,
       };
       localStorage.setItem(CHAVE_STORAGE, JSON.stringify(sessao));
-    } catch {
-      // Ignora erro de storage
-    }
+    } catch {}
   }
 
   function limparSessaoDoNavegador() {
     try {
       localStorage.removeItem(CHAVE_STORAGE);
-    } catch {
-      // Ignora erro de storage
-    }
+    } catch {}
   }
 
   function restaurarSessaoSalva() {
@@ -435,7 +523,6 @@ export default function VilaMarketApp() {
         }
       }
     } catch {
-      // Ignora erro caso o JSON salvo esteja corrompido
     } finally {
       setVerificandoSessao(false);
     }
@@ -460,23 +547,23 @@ export default function VilaMarketApp() {
   async function carregarDadosDashboard() {
     if (!usuarioLogado?.perfil_id) return;
 
-    // Dispara carregamento imediato da selfie caso já exista caminho na sessão
     if (usuarioLogado?.selfie_url && !selfieTemporariaUrl) {
       gerarUrlTemporariaSelfie(usuarioLogado.selfie_url).then((url) => {
         if (url) setSelfieTemporariaUrl(url);
       });
     }
 
-    // Busca perfil e dependentes em paralelo
     const [resPerfil, resDeps] = await Promise.all([
       supabase
         .from('perfis')
-        .select('id, condominio_id, unidade_id, complemento_apto, unidade_formatada, nome_completo, cpf, role, selfie_url, status_facial, status_cadastro, saldo_cashback, saldo_pre_pago')
+        .select(
+          'id, condominio_id, unidade_id, complemento_apto, unidade_formatada, nome_completo, cpf, whatsapp, role, selfie_url, status_facial, status_cadastro, saldo_cashback, saldo_pre_pago'
+        )
         .eq('id', usuarioLogado.perfil_id)
         .single(),
       supabase
         .from('perfis')
-        .select('id, nome_completo, cpf, role, selfie_url, status_facial, saldo_pre_pago, criado_em')
+        .select('id, nome_completo, cpf, role, selfie_url, status_facial, status_cadastro, saldo_pre_pago, criado_em')
         .eq('titular_id', usuarioLogado.perfil_id)
         .order('criado_em', { ascending: true }),
     ]);
@@ -484,27 +571,318 @@ export default function VilaMarketApp() {
     const perfil = resPerfil.data;
     if (perfil) {
       setPerfilDetalhes(perfil);
+      if (perfil.condominio_id) setCondominioId(perfil.condominio_id);
+      if (perfil.whatsapp && !anuncioWhatsapp) setAnuncioWhatsapp(perfil.whatsapp);
 
       if (perfil.selfie_url) {
         const urlSegura = await gerarUrlTemporariaSelfie(perfil.selfie_url);
-        if (urlSegura) {
-          setSelfieTemporariaUrl(urlSegura);
-        }
+        if (urlSegura) setSelfieTemporariaUrl(urlSegura);
       } else {
         setSelfieTemporariaUrl(null);
       }
 
       if (perfil.role === 'titular' || perfil.role === 'admin') {
-        setDependentesLista(resDeps.data || []);
-      }
-    } else if (usuarioLogado?.selfie_url) {
-      const urlSegura = await gerarUrlTemporariaSelfie(usuarioLogado.selfie_url);
-      if (urlSegura) {
-        setSelfieTemporariaUrl(urlSegura);
+        const deps = resDeps.data || [];
+        setDependentesLista(deps);
+
+        // Carrega miniaturas dos dependentes
+        const mapaFotos: Record<string, string> = {};
+        await Promise.all(
+          deps.map(async (d: any) => {
+            if (d.selfie_url) {
+              const u = await gerarUrlTemporariaSelfie(d.selfie_url);
+              if (u) mapaFotos[d.id] = u;
+            }
+          })
+        );
+        setDependentesSelfiesMap(mapaFotos);
       }
     }
   }
 
+  // =========================================================================
+  // MURAL & CLASSIFICADOS DA VILA
+  // =========================================================================
+  async function carregarMuralEClassificados() {
+    const [resAvisos, resClass] = await Promise.all([
+      supabase
+        .from('avisos_mural')
+        .select('*')
+        .order('fixado', { ascending: false })
+        .order('criado_em', { ascending: false }),
+      supabase
+        .from('classificados')
+        .select('*, perfis:anunciante_id (nome_completo, unidade_formatada)')
+        .order('criado_em', { ascending: false }),
+    ]);
+
+    if (resAvisos.data) setAvisosLista(resAvisos.data);
+    if (resClass.data) setClassificadosLista(resClass.data);
+  }
+
+  async function publicarNovoAnuncio(e: React.FormEvent) {
+    e.preventDefault();
+    if (!usuarioLogado?.perfil_id) return;
+
+    const precoNumerico = converterMoedaParaNumero(anuncioPreco);
+    if (!anuncioTitulo.trim()) {
+      alert('Informe o título/nome do produto ou serviço.');
+      return;
+    }
+
+    setCarregando(true);
+    try {
+      let cId = perfilDetalhes?.condominio_id || condominioId;
+      if (!cId) {
+        const { data: cData } = await supabase.from('condominios').select('id').limit(1);
+        cId = cData?.[0]?.id || null;
+      }
+
+      let fotoUrlPublica: string | null = null;
+      if (anuncioFotoFile) {
+        fotoUrlPublica = await enviarFotoPublicaComunidade(anuncioFotoFile, 'classificados');
+      }
+
+      const waLimpo = (anuncioWhatsapp || perfilDetalhes?.whatsapp || '').replace(/\D/g, '');
+
+      const { error } = await supabase.from('classificados').insert({
+        condominio_id: cId || null,
+        anunciante_id: usuarioLogado.perfil_id,
+        titulo: formatarNomeTitleCase(anuncioTitulo.trim()),
+        tipo_anuncio: anuncioTipo,
+        condicao: anuncioCondicao,
+        preco: precoNumerico,
+        descricao: anuncioDescricao.trim(),
+        whatsapp_contato: waLimpo,
+        imagem_url: fotoUrlPublica,
+        ativo: true,
+        status: 'ativo',
+      });
+
+      if (error) throw new Error(error.message);
+
+      setAnuncioTitulo('');
+      setAnuncioTipo('Comida & Doces');
+      setAnuncioCondicao('Novo');
+      setAnuncioPreco('');
+      setAnuncioDescricao('');
+      setAnuncioFotoFile(null);
+      setAnuncioFotoPreview(null);
+      setModalAtivo(null);
+      await carregarMuralEClassificados();
+      setMensagem({ tipo: 'sucesso', texto: '✅ Anúncio publicado nos Classificados da Vila!' });
+    } catch (err: any) {
+      alert('Erro ao publicar anúncio: ' + (err.message || 'Tente novamente.'));
+    } finally {
+      setCarregando(false);
+    }
+  }
+
+  async function alternarStatusMeuAnuncio(anuncio: any) {
+    const novoAtivo = !anuncio.ativo;
+    const { error } = await supabase
+      .from('classificados')
+      .update({ ativo: novoAtivo, status: novoAtivo ? 'ativo' : 'vendido' })
+      .eq('id', anuncio.id);
+
+    if (!error) {
+      await carregarMuralEClassificados();
+    }
+  }
+
+  async function excluirAnuncio(id: string) {
+    if (!window.confirm('Tem certeza que deseja excluir este anúncio?')) return;
+    const { error } = await supabase.from('classificados').delete().eq('id', id);
+    if (!error) {
+      await carregarMuralEClassificados();
+      if (abaInferior === 'admin') await carregarDadosAdmin();
+    }
+  }
+
+  // =========================================================================
+  // PAINEL ADMIN (MORADORES, CLASSIFICADOS E MURAL FEED)
+  // =========================================================================
+  async function carregarDadosAdmin() {
+    const [resPerfis, resClass, resAvisos] = await Promise.all([
+      supabase
+        .from('perfis')
+        .select('id, nome_completo, cpf, whatsapp, unidade_formatada, role, status_cadastro, status_facial, selfie_url, saldo_cashback, saldo_pre_pago, criado_em')
+        .order('nome_completo', { ascending: true }),
+      supabase
+        .from('classificados')
+        .select('*, perfis:anunciante_id (nome_completo, unidade_formatada)')
+        .order('criado_em', { ascending: false }),
+      supabase
+        .from('avisos_mural')
+        .select('*')
+        .order('fixado', { ascending: false })
+        .order('criado_em', { ascending: false }),
+    ]);
+
+    if (resPerfis.data) setAdminMoradores(resPerfis.data);
+    if (resClass.data) setClassificadosLista(resClass.data);
+    if (resAvisos.data) setAvisosLista(resAvisos.data);
+  }
+
+  async function adminAlternarBloqueioMorador(morador: any) {
+    const novoStatus = morador.status_cadastro === 'bloqueado' ? 'aprovado' : 'bloqueado';
+    setCarregando(true);
+    const { data, error } = await supabase.rpc('admin_atualizar_perfil', {
+      p_perfil_id: morador.id,
+      p_nome_completo: morador.nome_completo,
+      p_whatsapp: morador.whatsapp || '',
+      p_unidade_formatada: morador.unidade_formatada || '',
+      p_status_cadastro: novoStatus,
+      p_remover_foto: false,
+    });
+    setCarregando(false);
+
+    if (error || !data?.sucesso) {
+      alert(error?.message || data?.mensagem || 'Erro ao alterar status.');
+      return;
+    }
+    await carregarDadosAdmin();
+  }
+
+  function adminAbrirEdicaoMorador(morador: any) {
+    setAdminEditandoMorador(morador);
+    setAdminEditNome(morador.nome_completo || '');
+    setAdminEditWhatsapp(morador.whatsapp || '');
+    setAdminEditUnidade(morador.unidade_formatada || '');
+    setAdminEditStatus(morador.status_cadastro || 'aprovado');
+  }
+
+  async function adminSalvarEdicaoMorador(e: React.FormEvent) {
+    e.preventDefault();
+    if (!adminEditandoMorador) return;
+    setCarregando(true);
+
+    const { data, error } = await supabase.rpc('admin_atualizar_perfil', {
+      p_perfil_id: adminEditandoMorador.id,
+      p_nome_completo: formatarNomeTitleCase(adminEditNome),
+      p_whatsapp: adminEditWhatsapp.replace(/\D/g, ''),
+      p_unidade_formatada: adminEditUnidade,
+      p_status_cadastro: adminEditStatus,
+      p_remover_foto: false,
+    });
+    setCarregando(false);
+
+    if (error || !data?.sucesso) {
+      alert(error?.message || data?.mensagem || 'Erro ao salvar dados.');
+      return;
+    }
+
+    setAdminEditandoMorador(null);
+    await carregarDadosAdmin();
+    alert('Dados do morador atualizados!');
+  }
+
+  async function adminVisualizarSelfieMorador(morador: any) {
+    if (!morador.selfie_url) {
+      alert('Este morador ainda não enviou foto facial.');
+      return;
+    }
+    const url = await gerarUrlTemporariaSelfie(morador.selfie_url);
+    if (url) {
+      setAdminFotoAmpliadaUrl(url);
+      setAdminEditandoMorador(morador);
+    } else {
+      alert('Não foi possível carregar a imagem.');
+    }
+  }
+
+  async function adminRemoverFotoMorador(morador: any) {
+    if (!window.confirm(`Remover a foto facial de ${morador.nome_completo}? Ele precisará tirar uma nova selfie.`)) {
+      return;
+    }
+    setCarregando(true);
+    try {
+      if (morador.selfie_url && !morador.selfie_url.startsWith('data:image')) {
+        await supabase.storage.from('selfies').remove([morador.selfie_url]);
+      }
+      const { data, error } = await supabase.rpc('admin_atualizar_perfil', {
+        p_perfil_id: morador.id,
+        p_nome_completo: morador.nome_completo,
+        p_whatsapp: morador.whatsapp || '',
+        p_unidade_formatada: morador.unidade_formatada || '',
+        p_status_cadastro: morador.status_cadastro || 'aprovado',
+        p_remover_foto: true,
+      });
+      if (error || !data?.sucesso) throw new Error(error?.message || data?.mensagem);
+
+      setAdminFotoAmpliadaUrl(null);
+      setAdminEditandoMorador(null);
+      await carregarDadosAdmin();
+      alert('Foto removida! O status do morador voltou para Selfie Pendente.');
+    } catch (err: any) {
+      alert('Erro ao remover foto: ' + err.message);
+    } finally {
+      setCarregando(false);
+    }
+  }
+
+  async function adminSalvarAvisoMural(e: React.FormEvent) {
+    e.preventDefault();
+    if (!adminAvisoTitulo.trim() || !adminAvisoConteudo.trim()) return;
+    setCarregando(true);
+
+    try {
+      let cId = perfilDetalhes?.condominio_id || condominioId;
+      if (!cId) {
+        const { data: cData } = await supabase.from('condominios').select('id').limit(1);
+        cId = cData?.[0]?.id || null;
+      }
+
+      let imagemFinalUrl = adminAvisoFotoPreview;
+      if (adminAvisoFotoFile) {
+        imagemFinalUrl = await enviarFotoPublicaComunidade(adminAvisoFotoFile, 'mural');
+      }
+
+      if (adminAvisoEditId) {
+        const { error } = await supabase
+          .from('avisos_mural')
+          .update({
+            titulo: adminAvisoTitulo.trim(),
+            conteudo: adminAvisoConteudo.trim(),
+            imagem_url: imagemFinalUrl || null,
+          })
+          .eq('id', adminAvisoEditId);
+        if (error) throw new Error(error.message);
+      } else {
+        const { error } = await supabase.from('avisos_mural').insert({
+          condominio_id: cId || null,
+          autor_id: usuarioLogado.perfil_id,
+          titulo: adminAvisoTitulo.trim(),
+          conteudo: adminAvisoConteudo.trim(),
+          imagem_url: imagemFinalUrl || null,
+          fixado: false,
+        });
+        if (error) throw new Error(error.message);
+      }
+
+      setAdminAvisoEditId(null);
+      setAdminAvisoTitulo('');
+      setAdminAvisoConteudo('');
+      setAdminAvisoFotoFile(null);
+      setAdminAvisoFotoPreview(null);
+      await carregarDadosAdmin();
+      alert('Aviso publicado no Mural!');
+    } catch (err: any) {
+      alert('Erro ao salvar aviso: ' + err.message);
+    } finally {
+      setCarregando(false);
+    }
+  }
+
+  async function adminExcluirAvisoMural(id: string) {
+    if (!window.confirm('Excluir este aviso do Mural?')) return;
+    const { error } = await supabase.from('avisos_mural').delete().eq('id', id);
+    if (!error) await carregarDadosAdmin();
+  }
+
+  // =========================================================================
+  // LOGIN, CADASTRO E WHATSAPP
+  // =========================================================================
   async function fazerLogin(e: React.FormEvent) {
     e.preventDefault();
     setCarregando(true);
@@ -569,11 +947,11 @@ export default function VilaMarketApp() {
 
     const { error: perfilErr } = await supabase.from('perfis').insert({
       id: authData.user.id,
-      condominio_id: condominioId,
-      unidade_id: unidadeId,
+      condominio_id: condominioId || null,
+      unidade_id: unidadeId || null,
       complemento_apto: tipoUnidade === 'bloco' ? complementoApto : null,
       unidade_formatada: formatada,
-      nome_completo: nome,
+      nome_completo: formatarNomeTitleCase(nome.trim()),
       cpf: cpfLimpo,
       data_nascimento: dataNasc,
       whatsapp: waLimpo,
@@ -676,7 +1054,7 @@ export default function VilaMarketApp() {
   }
 
   // =========================================================================
-  // FUNÇÕES DA DASHBOARD (SELFIE COM SALVAMENTO GARANTIDO VIA RPC)
+  // SELFIE, PIN, EXTRATO E DEPENDENTES
   // =========================================================================
   async function iniciarCameraSelfie() {
     setFotoCapturada(null);
@@ -857,6 +1235,7 @@ export default function VilaMarketApp() {
     return idade;
   }
 
+  // CORREÇÃO DO ERRO invalid input syntax for type uuid: ""
   async function cadastrarDependente(e: React.FormEvent) {
     e.preventDefault();
     const idade = calcularIdade(depNascimento);
@@ -881,9 +1260,26 @@ export default function VilaMarketApp() {
 
     setCarregando(true);
     try {
+      // Garante UUIDs válidos (nunca string vazia "")
+      let cId: string | null = perfilDetalhes?.condominio_id || condominioId || null;
+      if (!cId) {
+        const { data: conds } = await supabase.from('condominios').select('id').limit(1);
+        cId = conds?.[0]?.id || null;
+      }
+
+      const uId: string | null = perfilDetalhes?.unidade_id || null;
+      const tId: string | null = usuarioLogado?.perfil_id || null;
+
+      if (!tId) {
+        throw new Error('Sessão do titular não identificada. Faça login novamente.');
+      }
+
       const cpfDepLimpo = depCpf.replace(/\D/g, '');
       const emailTecnicoDep = `user_${cpfDepLimpo}@vilamarket.com.br`;
       const senhaAuthDep = `VM#${depPin}#${cpfDepLimpo.slice(-4)}`;
+
+      // Guarda a sessão atual do titular antes do signUp para restaurar depois
+      const { data: sessaoTitularAtual } = await supabase.auth.getSession();
 
       const { data: authData, error: authErr } = await supabase.auth.signUp({
         email: emailTecnicoDep,
@@ -894,20 +1290,18 @@ export default function VilaMarketApp() {
         throw new Error(authErr?.message || 'CPF já cadastrado');
       }
 
-      const caminhoSelfieDep = await enviarSelfieParaStoragePrivado(
-        depSelfieBase64,
-        authData.user.id
-      );
+      const novoDepId = authData.user.id;
+      const caminhoSelfieDep = await enviarSelfieParaStoragePrivado(depSelfieBase64, novoDepId);
 
       const { error: insertErr } = await supabase.from('perfis').insert({
-        id: authData.user.id,
-        condominio_id: perfilDetalhes?.condominio_id || condominioId,
-        unidade_id: perfilDetalhes?.unidade_id,
-        complemento_apto: perfilDetalhes?.complemento_apto,
+        id: novoDepId,
+        condominio_id: cId,
+        unidade_id: uId,
+        complemento_apto: perfilDetalhes?.complemento_apto || null,
         unidade_formatada:
-          perfilDetalhes?.unidade_formatada || usuarioLogado.unidade_formatada || usuarioLogado.unidade,
-        titular_id: usuarioLogado.perfil_id,
-        nome_completo: depNome,
+          perfilDetalhes?.unidade_formatada || usuarioLogado.unidade_formatada || usuarioLogado.unidade || '',
+        titular_id: tId,
+        nome_completo: formatarNomeTitleCase(depNome.trim()),
         cpf: cpfDepLimpo,
         data_nascimento: depNascimento,
         role: 'dependente',
@@ -920,9 +1314,17 @@ export default function VilaMarketApp() {
       if (insertErr) throw new Error(insertErr.message);
 
       await supabase.rpc('definir_pin_usuario', {
-        p_perfil_id: authData.user.id,
+        p_perfil_id: novoDepId,
         p_pin_aberto: depPin,
       });
+
+      // Restaura a sessão do titular caso o signUp tenha trocado a sessão ativa
+      if (sessaoTitularAtual?.session) {
+        await supabase.auth.setSession({
+          access_token: sessaoTitularAtual.session.access_token,
+          refresh_token: sessaoTitularAtual.session.refresh_token,
+        });
+      }
 
       setDepNome('');
       setDepCpf('');
@@ -1027,6 +1429,37 @@ export default function VilaMarketApp() {
   const temSelfie = Boolean(perfilDetalhes?.selfie_url || usuarioLogado?.selfie_url || selfieTemporariaUrl);
   const roleUsuario = perfilDetalhes?.role || usuarioLogado?.role || 'titular';
 
+  // Filtros dos Classificados
+  const classificadosFiltrados = classificadosLista.filter((item) => {
+    const ehMeu = item.anunciante_id === usuarioLogado?.perfil_id;
+    if (somenteMeusAnuncios && !ehMeu) return false;
+    if (!somenteMeusAnuncios && !item.ativo) return false;
+    if (filtroCategoria !== 'Todos' && item.tipo_anuncio !== filtroCategoria) return false;
+    if (buscaClassificados.trim()) {
+      const q = buscaClassificados.toLowerCase();
+      const matchTitulo = (item.titulo || '').toLowerCase().includes(q);
+      const matchDesc = (item.descricao || '').toLowerCase().includes(q);
+      if (!matchTitulo && !matchDesc) return false;
+    }
+    return true;
+  });
+
+  // Filtros do Painel Admin
+  const adminMoradoresFiltrados = adminMoradores.filter((m) => {
+    if (adminFiltroStatus === 'aprovado' && m.status_cadastro !== 'aprovado') return false;
+    if (adminFiltroStatus === 'bloqueado' && m.status_cadastro !== 'bloqueado') return false;
+    if (adminFiltroStatus === 'sem_selfie' && Boolean(m.selfie_url)) return false;
+
+    if (adminBuscaMorador.trim()) {
+      const q = adminBuscaMorador.toLowerCase();
+      const matchNome = (m.nome_completo || '').toLowerCase().includes(q);
+      const matchCpf = (m.cpf || '').includes(q);
+      const matchUnidade = (m.unidade_formatada || '').toLowerCase().includes(q);
+      if (!matchNome && !matchCpf && !matchUnidade) return false;
+    }
+    return true;
+  });
+
   if (verificandoSessao) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-100">
@@ -1122,7 +1555,7 @@ export default function VilaMarketApp() {
             </form>
           )}
 
-          {/* ABA 2: CADASTRO COM AS 3 RUAS DA VILA MILITAR + TERMO LGPD */}
+          {/* ABA 2: CADASTRO COM TITLE CASE AUTOMÁTICO */}
           {aba === 'cadastro' && (
             <form onSubmit={realizarCadastro} className="space-y-3">
               <h2 className="font-bold text-lg text-grafite">Novo Cadastro na Vila</h2>
@@ -1132,7 +1565,7 @@ export default function VilaMarketApp() {
                 required
                 placeholder="Nome Completo"
                 value={nome}
-                onChange={(e) => setNome(e.target.value)}
+                onChange={(e) => setNome(formatarNomeTitleCase(e.target.value))}
                 className="w-full p-2.5 border rounded-xl text-sm"
               />
 
@@ -1246,7 +1679,6 @@ export default function VilaMarketApp() {
                 />
               </div>
 
-              {/* CONSENTIMENTO EXPLÍCITO LGPD */}
               <label className="flex items-start gap-2 bg-gray-50 p-2.5 rounded-xl border border-gray-200 text-[11px] text-gray-600 cursor-pointer">
                 <input
                   type="checkbox"
@@ -1305,7 +1737,7 @@ export default function VilaMarketApp() {
             </form>
           )}
 
-          {/* ABA 4: ESQUECI MEU PIN (RESET VIA WHATSAPP) */}
+          {/* ABA 4: ESQUECI MEU PIN */}
           {aba === 'esqueci_pin' && (
             <form onSubmit={salvarNovoPinWhatsApp} className="space-y-3">
               <h2 className="font-bold text-lg">Recuperar PIN via WhatsApp</h2>
@@ -1360,13 +1792,12 @@ export default function VilaMarketApp() {
             </form>
           )}
 
-          {/* ABA 5: PAINEL DO MORADOR LOGADO (LAYOUT CLEAN) */}
+          {/* ABA 5: PAINEL DO MORADOR LOGADO */}
           {aba === 'painel' && usuarioLogado && (
             <div className="space-y-5">
-              {/* SUB-ABA INÍCIO (CLEAN: MINIATURA CLICÁVEL + SALDOS + DEPENDENTES) */}
+              {/* SUB-ABA INÍCIO */}
               {abaInferior === 'inicio' && (
                 <>
-                  {/* Card de Boas-Vindas Clean */}
                   {!temSelfie ? (
                     <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl">
                       <div className="flex items-center justify-between gap-2">
@@ -1402,27 +1833,24 @@ export default function VilaMarketApp() {
                         </p>
                       </div>
 
-                      {/* Miniatura clicável para ampliar e avaliar nitidez */}
+                      {/* Miniatura clicável sem o texto "Ampliar" */}
                       <button
                         type="button"
                         onClick={abrirModalSelfie}
-                        title="Toque para ampliar ou atualizar sua selfie"
-                        className="flex flex-col items-center shrink-0 group"
+                        title="Toque na foto para ampliar ou atualizar"
+                        className="shrink-0 group focus:outline-none"
                       >
                         {selfieTemporariaUrl ? (
                           <img
                             src={selfieTemporariaUrl}
                             alt="Sua selfie"
-                            className="w-16 h-16 rounded-full object-cover border-2 border-emerald-600 shadow-md"
+                            className="w-16 h-16 rounded-full object-cover border-2 border-emerald-600 shadow-md group-hover:scale-105 transition"
                           />
                         ) : (
                           <div className="w-16 h-16 rounded-full bg-emerald-100 border-2 border-emerald-600 flex items-center justify-center">
                             <span className="w-5 h-5 border-2 border-emerald-700 border-t-transparent rounded-full animate-spin" />
                           </div>
                         )}
-                        <span className="text-[10px] text-emerald-800 font-semibold mt-1">
-                          Ampliar
-                        </span>
                       </button>
                     </div>
                   )}
@@ -1453,7 +1881,7 @@ export default function VilaMarketApp() {
                     </div>
                   </div>
 
-                  {/* Seção Meus Dependentes (Se titular ou admin) */}
+                  {/* Seção Meus Dependentes */}
                   {(roleUsuario === 'titular' || roleUsuario === 'admin') && (
                     <div className="pt-3 border-t border-gray-200 space-y-3">
                       <div className="flex items-center justify-between">
@@ -1482,28 +1910,56 @@ export default function VilaMarketApp() {
                         </div>
                       ) : (
                         <div className="space-y-2">
-                          {dependentesLista.map((dep) => (
-                            <div
-                              key={dep.id}
-                              className="flex items-center justify-between bg-gray-50 border border-gray-200 p-3 rounded-xl"
-                            >
-                              <div>
-                                <p className="text-sm font-bold text-grafite">
-                                  {dep.nome_completo}
-                                </p>
-                                <p className="text-xs text-emerald-700 font-semibold">
-                                  Saldo: R$ {Number(dep.saldo_pre_pago || 0).toFixed(2)}
-                                </p>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => abrirModalPixDependente(dep)}
-                                className="bg-ambar text-white text-xs font-bold px-3 py-2 rounded-xl transition"
+                          {dependentesLista.map((dep) => {
+                            const depBloqueado = dep.status_cadastro === 'bloqueado';
+                            const depFotoUrl = dependentesSelfiesMap[dep.id];
+                            return (
+                              <div
+                                key={dep.id}
+                                className="flex items-center justify-between gap-2 bg-gray-50 border border-gray-200 p-3 rounded-xl"
                               >
-                                Adicionar Saldo Pix
-                              </button>
-                            </div>
-                          ))}
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  {depFotoUrl ? (
+                                    <img
+                                      src={depFotoUrl}
+                                      alt={dep.nome_completo}
+                                      className="w-10 h-10 rounded-full object-cover border border-emerald-600 shrink-0"
+                                    />
+                                  ) : (
+                                    <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-xs font-bold text-gray-600 shrink-0">
+                                      👤
+                                    </div>
+                                  )}
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-1.5">
+                                      <p className="text-sm font-bold text-grafite truncate">
+                                        {dep.nome_completo}
+                                      </p>
+                                      <span
+                                        className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
+                                          depBloqueado
+                                            ? 'bg-red-100 text-red-700'
+                                            : 'bg-emerald-100 text-emerald-800'
+                                        }`}
+                                      >
+                                        {depBloqueado ? 'Bloqueado' : 'Ativo'}
+                                      </span>
+                                    </div>
+                                    <p className="text-xs text-emerald-700 font-semibold">
+                                      Saldo: R$ {Number(dep.saldo_pre_pago || 0).toFixed(2)}
+                                    </p>
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => abrirModalPixDependente(dep)}
+                                  className="bg-ambar text-white text-xs font-bold px-3 py-2 rounded-xl transition shrink-0"
+                                >
+                                  + Pix
+                                </button>
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -1511,60 +1967,319 @@ export default function VilaMarketApp() {
                 </>
               )}
 
-              {/* SUB-ABA MURAL / CLASSIFICADOS */}
+              {/* SUB-ABA MURAL (FEED) & CLASSIFICADOS DA VILA */}
               {abaInferior === 'mural' && (
                 <div className="space-y-4">
-                  <h2 className="text-lg font-bold text-grafite">Mural & Classificados da Vila</h2>
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-lg font-bold text-grafite">Mural & Classificados</h2>
+                    {subAbaMural === 'classificados' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAnuncioWhatsapp(perfilDetalhes?.whatsapp || '');
+                          setModalAtivo('novo_anuncio');
+                        }}
+                        className="bg-floresta hover:bg-floresta-claro text-white text-xs font-bold px-3 py-2 rounded-xl transition"
+                      >
+                        + Criar Anúncio
+                      </button>
+                    )}
+                  </div>
+
                   <div className="grid grid-cols-2 gap-2 bg-gray-100 p-1 rounded-xl">
                     <button
                       type="button"
                       onClick={() => setSubAbaMural('avisos')}
-                      className={`py-2 text-xs font-bold rounded-lg ${
+                      className={`py-2 text-xs font-bold rounded-lg transition ${
                         subAbaMural === 'avisos' ? 'bg-floresta text-white' : 'text-gray-600'
                       }`}
                     >
-                      Avisos Oficiais
+                      Avisos Oficiais ({avisosLista.length})
                     </button>
                     <button
                       type="button"
                       onClick={() => setSubAbaMural('classificados')}
-                      className={`py-2 text-xs font-bold rounded-lg ${
+                      className={`py-2 text-xs font-bold rounded-lg transition ${
                         subAbaMural === 'classificados' ? 'bg-floresta text-white' : 'text-gray-600'
                       }`}
                     >
-                      Classificados
+                      Classificados ({classificadosLista.filter((c) => c.ativo).length})
                     </button>
                   </div>
 
+                  {/* FEED DO MURAL DE AVISOS (AJUSTÁVEL AO TAMANHO DA IMAGEM) */}
                   {subAbaMural === 'avisos' ? (
-                    <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl text-xs text-emerald-950 space-y-1">
-                      <p className="font-bold text-sm">🎉 Bem-vindo ao VilaMarket!</p>
-                      <p>
-                        Compre no minimercado autônomo da Vila usando Pix e ganhe 2% de cashback
-                        automático na sua carteira.
-                      </p>
+                    <div className="space-y-4">
+                      {avisosLista.length === 0 ? (
+                        <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl text-xs text-emerald-950 space-y-1">
+                          <p className="font-bold text-sm">🎉 Bem-vindo ao VilaMarket!</p>
+                          <p>
+                            Compre no minimercado autônomo da Vila usando Pix e ganhe 2% de cashback
+                            automático na sua carteira.
+                          </p>
+                        </div>
+                      ) : (
+                        avisosLista.map((aviso) => (
+                          <article
+                            key={aviso.id}
+                            className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm"
+                          >
+                            <div className="p-3.5 border-b border-gray-100 flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className="w-7 h-7 rounded-full bg-floresta text-white flex items-center justify-center text-xs font-bold">
+                                  VM
+                                </span>
+                                <div>
+                                  <p className="text-xs font-bold text-grafite">Administração VilaMarket</p>
+                                  <p className="text-[10px] text-gray-400">
+                                    {new Date(aviso.criado_em).toLocaleDateString('pt-BR')}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+
+                            {aviso.imagem_url && (
+                              <div className="w-full bg-gray-100">
+                                <img
+                                  src={aviso.imagem_url}
+                                  alt={aviso.titulo}
+                                  className="w-full h-auto max-h-[480px] object-contain mx-auto block"
+                                />
+                              </div>
+                            )}
+
+                            <div className="p-4 space-y-1.5">
+                              <h3 className="font-bold text-sm text-grafite">{aviso.titulo}</h3>
+                              <p className="text-xs text-gray-700 whitespace-pre-line leading-relaxed">
+                                {aviso.conteudo}
+                              </p>
+                            </div>
+                          </article>
+                        ))
+                      )}
                     </div>
                   ) : (
-                    <div className="bg-gray-50 border border-gray-200 p-4 rounded-xl text-xs text-gray-600 text-center">
-                      Espaço aberto para moradores divulgarem produtos caseiros, encomendas e
-                      serviços na Vila Militar.
+                    /* CLASSIFICADOS DA VILA COM FILTRO POR TIPO E MEUS ANÚNCIOS */
+                    <div className="space-y-3">
+                      {/* Busca e alternador Meus Anúncios */}
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          placeholder="Buscar bolo, móvel, serviço..."
+                          value={buscaClassificados}
+                          onChange={(e) => setBuscaClassificados(e.target.value)}
+                          className="flex-1 p-2 border rounded-xl text-xs bg-gray-50 focus:bg-white outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setSomenteMeusAnuncios(!somenteMeusAnuncios)}
+                          className={`px-3 py-2 rounded-xl text-[11px] font-bold border transition shrink-0 ${
+                            somenteMeusAnuncios
+                              ? 'bg-ambar text-white border-ambar'
+                              : 'bg-gray-50 text-gray-700 border-gray-200'
+                          }`}
+                        >
+                          Meus Anúncios
+                        </button>
+                      </div>
+
+                      {/* Barra horizontal deslizável de categorias */}
+                      <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+                        {CATEGORIAS_CLASSIFICADOS.map((cat) => (
+                          <button
+                            key={cat}
+                            type="button"
+                            onClick={() => setFiltroCategoria(cat)}
+                            className={`px-3 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap transition ${
+                              filtroCategoria === cat
+                                ? 'bg-floresta text-white'
+                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                            }`}
+                          >
+                            {cat}
+                          </button>
+                        ))}
+                      </div>
+
+                      {classificadosFiltrados.length === 0 ? (
+                        <div className="bg-gray-50 border border-dashed border-gray-200 p-6 rounded-xl text-center space-y-2">
+                          <p className="text-xs text-gray-500">
+                            Nenhum anúncio encontrado para este filtro.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAnuncioWhatsapp(perfilDetalhes?.whatsapp || '');
+                              setModalAtivo('novo_anuncio');
+                            }}
+                            className="text-xs font-bold text-floresta underline"
+                          >
+                            Publicar o primeiro anúncio agora
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {classificadosFiltrados.map((item) => {
+                            const ehMeu = item.anunciante_id === usuarioLogado?.perfil_id;
+                            const waLink = item.whatsapp_contato
+                              ? `https://wa.me/55${item.whatsapp_contato.replace(/\D/g, '')}?text=${encodeURIComponent(
+                                  `Olá! Vi seu anúncio "${item.titulo}" no VilaMarket.`
+                                )}`
+                              : null;
+
+                            return (
+                              <div
+                                key={item.id}
+                                className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm"
+                              >
+                                {item.imagem_url && (
+                                  <div className="w-full bg-gray-100">
+                                    <img
+                                      src={item.imagem_url}
+                                      alt={item.titulo}
+                                      className="w-full h-auto max-h-72 object-contain mx-auto block"
+                                    />
+                                  </div>
+                                )}
+
+                                <div className="p-3.5 space-y-2">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div>
+                                      <div className="flex flex-wrap gap-1 mb-1">
+                                        <span className="text-[10px] font-bold bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded-full">
+                                          {item.tipo_anuncio || 'Geral'}
+                                        </span>
+                                        <span className="text-[10px] font-semibold bg-gray-100 text-gray-700 px-2 py-0.5 rounded-full">
+                                          {item.condicao || 'Novo'}
+                                        </span>
+                                        {!item.ativo && (
+                                          <span className="text-[10px] font-bold bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
+                                            Pausado / Vendido
+                                          </span>
+                                        )}
+                                      </div>
+                                      <h3 className="font-bold text-sm text-grafite">{item.titulo}</h3>
+                                    </div>
+                                    <span className="font-extrabold text-sm text-floresta shrink-0">
+                                      {Number(item.preco) > 0
+                                        ? `R$ ${Number(item.preco).toFixed(2).replace('.', ',')}`
+                                        : 'A combinar'}
+                                    </span>
+                                  </div>
+
+                                  {item.descricao && (
+                                    <p className="text-xs text-gray-600 whitespace-pre-line">
+                                      {item.descricao}
+                                    </p>
+                                  )}
+
+                                  <div className="pt-2 border-t border-gray-100 flex items-center justify-between gap-2">
+                                    <div className="text-[10px] text-gray-500 truncate">
+                                      <span className="font-bold text-gray-700">
+                                        {item.perfis?.nome_completo || 'Morador da Vila'}
+                                      </span>
+                                      {item.perfis?.unidade_formatada && (
+                                        <span className="block truncate">
+                                          {item.perfis.unidade_formatada}
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    {ehMeu ? (
+                                      <div className="flex gap-1.5 shrink-0">
+                                        <button
+                                          type="button"
+                                          onClick={() => alternarStatusMeuAnuncio(item)}
+                                          className="text-[11px] font-bold px-2.5 py-1.5 rounded-lg bg-amber-100 text-amber-900"
+                                        >
+                                          {item.ativo ? 'Marcar Vendido' : 'Reativar'}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => excluirAnuncio(item.id)}
+                                          className="text-[11px] font-bold px-2.5 py-1.5 rounded-lg bg-red-50 text-red-600"
+                                        >
+                                          Excluir
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      waLink && (
+                                        <a
+                                          href={waLink}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-xl shrink-0 transition"
+                                        >
+                                          💬 Chamar no WhatsApp
+                                        </a>
+                                      )
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
               )}
 
-              {/* SUB-ABA PERFIL / SAIR (COM SELFIE EM DESTAQUE, ALTERAR PIN E EXTRATO) */}
+              {/* SUB-ABA AJUDA / COMO USAR */}
+              {abaInferior === 'ajuda' && (
+                <div className="space-y-4">
+                  <h2 className="text-lg font-bold text-grafite">Como Usar o VilaMarket</h2>
+
+                  <div className="space-y-2.5 text-xs">
+                    <div className="bg-gray-50 border border-gray-200 p-3.5 rounded-xl space-y-1">
+                      <p className="font-bold text-floresta">1. Abertura da Porta (Acesso Facial)</p>
+                      <p className="text-gray-600">
+                        Cadastre sua selfie na tela inicial com boa iluminação. Ao chegar na porta do
+                        minimercado, olhe para o leitor facial e a trava será liberada em menos de 1
+                        segundo.
+                      </p>
+                    </div>
+
+                    <div className="bg-gray-50 border border-gray-200 p-3.5 rounded-xl space-y-1">
+                      <p className="font-bold text-floresta">2. Pagamento no Caixa & Cashback 2%</p>
+                      <p className="text-gray-600">
+                        Escaneie seus produtos no totem. Pagando via Pix você recebe 2% de volta na
+                        hora, ou pode usar seu Saldo Cashback e Saldo Pré-Pago digitando CPF + PIN.
+                      </p>
+                    </div>
+
+                    <div className="bg-gray-50 border border-gray-200 p-3.5 rounded-xl space-y-1">
+                      <p className="font-bold text-floresta">3. Dependentes & Classificados</p>
+                      <p className="text-gray-600">
+                        Titulares podem cadastrar dependentes (a partir de 12 anos) com saldo pré-pago
+                        individual e anunciar produtos ou serviços nos Classificados da Vila.
+                      </p>
+                    </div>
+                  </div>
+
+                  <a
+                    href="https://wa.me/5541999999999?text=Ol%C3%A1!%20Preciso%20de%20ajuda%20com%20o%20app%20VilaMarket."
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block w-full text-center bg-floresta hover:bg-floresta-claro text-white font-bold py-3 rounded-xl text-xs transition"
+                  >
+                    💬 Falar com o Suporte VilaMarket
+                  </a>
+                </div>
+              )}
+
+              {/* SUB-ABA PERFIL / SAIR */}
               {abaInferior === 'perfil' && (
                 <div className="space-y-4">
                   <h2 className="text-lg font-bold text-grafite">Meu Perfil</h2>
 
-                  {/* Cartão do Morador com Foto em Destaque */}
                   <div className="bg-gray-50 border border-gray-200 p-4 rounded-xl flex items-center gap-3.5">
                     <button
                       type="button"
                       onClick={abrirModalSelfie}
-                      className="relative shrink-0 group"
-                      title="Toque para ampliar ou atualizar foto"
+                      className="relative shrink-0 group focus:outline-none"
+                      title="Toque na foto para ampliar ou atualizar"
                     >
                       {temSelfie && selfieTemporariaUrl ? (
                         <img
@@ -1577,9 +2292,6 @@ export default function VilaMarketApp() {
                           📷
                         </div>
                       )}
-                      <span className="absolute -bottom-1 -right-1 bg-white border border-gray-200 rounded-full px-1.5 py-0.5 text-[9px] font-bold text-grafite shadow-sm">
-                        🔍
-                      </span>
                     </button>
 
                     <div className="text-xs space-y-1 text-gray-700 min-w-0">
@@ -1597,7 +2309,6 @@ export default function VilaMarketApp() {
                     </div>
                   </div>
 
-                  {/* Ações da Conta (Minha Selfie, Alterar PIN, Extrato) */}
                   <div className="space-y-2">
                     <button
                       type="button"
@@ -1612,7 +2323,7 @@ export default function VilaMarketApp() {
                           </p>
                           <p className="text-[11px] text-gray-500">
                             {temSelfie
-                              ? 'Ampliar foto atual para conferir qualidade ou tirar nova'
+                              ? 'Conferir foto atual ou capturar nova'
                               : 'Cadastrar foto do rosto para liberar a porta'}
                           </p>
                         </div>
@@ -1686,25 +2397,604 @@ export default function VilaMarketApp() {
                 </div>
               )}
 
-              {/* SUB-ABA ADMIN (CASO SEJA ADMINISTRADOR) */}
+              {/* SUB-ABA ADMIN COMPLETO (MORADORES, CLASSIFICADOS E MURAL FEED) */}
               {abaInferior === 'admin' && roleUsuario === 'admin' && (
-                <div className="space-y-3">
-                  <h2 className="text-lg font-bold text-grafite">Administração VilaMarket</h2>
-                  <p className="text-xs text-gray-600">
-                    Gerencie moradores da Vila, leitor facial Intelbras e avisos do mural.
-                  </p>
-                  <a
-                    href="/admin"
-                    className="block w-full text-center bg-floresta text-white font-bold py-3 rounded-xl text-xs"
-                  >
-                    Acessar Painel Admin Completo
-                  </a>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-lg font-bold text-grafite">Painel Admin</h2>
+                    <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                      {adminMoradores.length} cadastros
+                    </span>
+                  </div>
+
+                  {/* Navegação interna do Admin */}
+                  <div className="grid grid-cols-3 gap-1.5 bg-gray-100 p-1 rounded-xl">
+                    <button
+                      type="button"
+                      onClick={() => setAdminSecao('moradores')}
+                      className={`py-2 text-[11px] font-bold rounded-lg transition ${
+                        adminSecao === 'moradores' ? 'bg-floresta text-white' : 'text-gray-600'
+                      }`}
+                    >
+                      Moradores
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAdminSecao('classificados')}
+                      className={`py-2 text-[11px] font-bold rounded-lg transition ${
+                        adminSecao === 'classificados' ? 'bg-floresta text-white' : 'text-gray-600'
+                      }`}
+                    >
+                      Classificados
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAdminSecao('mural')}
+                      className={`py-2 text-[11px] font-bold rounded-lg transition ${
+                        adminSecao === 'mural' ? 'bg-floresta text-white' : 'text-gray-600'
+                      }`}
+                    >
+                      Mural Avisos
+                    </button>
+                  </div>
+
+                  {/* SEÇÃO 1: LISTA INTERATIVA DE MORADORES E DEPENDENTES */}
+                  {adminSecao === 'moradores' && (
+                    <div className="space-y-3">
+                      <input
+                        type="text"
+                        placeholder="Buscar por nome, CPF ou bloco/casa..."
+                        value={adminBuscaMorador}
+                        onChange={(e) => setAdminBuscaMorador(e.target.value)}
+                        className="w-full p-2.5 border rounded-xl text-xs"
+                      />
+
+                      <div className="flex gap-1 overflow-x-auto pb-1">
+                        {[
+                          { id: 'todos', label: 'Todos' },
+                          { id: 'aprovado', label: 'Ativos' },
+                          { id: 'bloqueado', label: 'Bloqueados' },
+                          { id: 'sem_selfie', label: 'Sem Foto' },
+                        ].map((f) => (
+                          <button
+                            key={f.id}
+                            type="button"
+                            onClick={() => setAdminFiltroStatus(f.id as any)}
+                            className={`px-2.5 py-1 rounded-full text-[11px] font-bold ${
+                              adminFiltroStatus === f.id
+                                ? 'bg-floresta text-white'
+                                : 'bg-gray-100 text-gray-600'
+                            }`}
+                          >
+                            {f.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="space-y-2.5 max-h-[460px] overflow-y-auto pr-0.5">
+                        {adminMoradoresFiltrados.map((m) => {
+                          const bloqueado = m.status_cadastro === 'bloqueado';
+                          return (
+                            <div
+                              key={m.id}
+                              className={`p-3 rounded-xl border text-xs space-y-2 ${
+                                bloqueado ? 'bg-red-50/60 border-red-200' : 'bg-gray-50 border-gray-200'
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <p className="font-bold text-grafite truncate">{m.nome_completo}</p>
+                                    <span className="text-[9px] uppercase font-bold px-1.5 py-0.5 rounded bg-gray-200 text-gray-700">
+                                      {m.role}
+                                    </span>
+                                    <span
+                                      className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                                        bloqueado
+                                          ? 'bg-red-100 text-red-700'
+                                          : 'bg-emerald-100 text-emerald-800'
+                                      }`}
+                                    >
+                                      {bloqueado ? 'Bloqueado' : 'Ativo'}
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-gray-600 truncate mt-0.5">
+                                    {m.unidade_formatada || 'Sem unidade'}
+                                  </p>
+                                  <p className="text-[10px] text-gray-500">
+                                    CPF: {m.cpf} • WA: {m.whatsapp || 'N/I'}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-3 gap-1.5 pt-1">
+                                <button
+                                  type="button"
+                                  onClick={() => adminAlternarBloqueioMorador(m)}
+                                  className={`py-1.5 rounded-lg font-bold text-[11px] ${
+                                    bloqueado
+                                      ? 'bg-emerald-600 text-white'
+                                      : 'bg-red-100 text-red-700'
+                                  }`}
+                                >
+                                  {bloqueado ? 'Desbloquear' : 'Bloquear'}
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => adminAbrirEdicaoMorador(m)}
+                                  className="py-1.5 rounded-lg font-bold text-[11px] bg-white border border-gray-300 text-grafite"
+                                >
+                                  Dados / Editar
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => adminVisualizarSelfieMorador(m)}
+                                  disabled={!m.selfie_url}
+                                  className={`py-1.5 rounded-lg font-bold text-[11px] ${
+                                    m.selfie_url
+                                      ? 'bg-amber-100 text-amber-900'
+                                      : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                  }`}
+                                >
+                                  {m.selfie_url ? 'Ver Foto' : 'Sem Foto'}
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* SEÇÃO 2: MODERAÇÃO DOS CLASSIFICADOS */}
+                  {adminSecao === 'classificados' && (
+                    <div className="space-y-2.5 max-h-[480px] overflow-y-auto">
+                      {classificadosLista.length === 0 ? (
+                        <p className="text-xs text-gray-500 text-center py-6">
+                          Nenhum anúncio publicado nos Classificados.
+                        </p>
+                      ) : (
+                        classificadosLista.map((item) => (
+                          <div
+                            key={item.id}
+                            className="p-3 bg-gray-50 border border-gray-200 rounded-xl text-xs space-y-2"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <span className="text-[10px] font-bold text-emerald-800">
+                                  {item.tipo_anuncio} • {item.condicao}
+                                </span>
+                                <p className="font-bold text-grafite">{item.titulo}</p>
+                                <p className="text-[10px] text-gray-500">
+                                  Por: {item.perfis?.nome_completo || 'Morador'}
+                                </p>
+                              </div>
+                              <span
+                                className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                  item.ativo
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-red-100 text-red-700'
+                                }`}
+                              >
+                                {item.ativo ? 'Ativo' : 'Oculto'}
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  await supabase
+                                    .from('classificados')
+                                    .update({ ativo: !item.ativo })
+                                    .eq('id', item.id);
+                                  await carregarDadosAdmin();
+                                }}
+                                className="py-1.5 rounded-lg font-bold text-[11px] bg-amber-100 text-amber-900"
+                              >
+                                {item.ativo ? 'Ocultar Anúncio' : 'Aprovar / Ativar'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => excluirAnuncio(item.id)}
+                                className="py-1.5 rounded-lg font-bold text-[11px] bg-red-100 text-red-700"
+                              >
+                                Excluir Definitivo
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+
+                  {/* SEÇÃO 3: GESTÃO DO MURAL DE AVISOS (COM UPLOAD DE FOTO) */}
+                  {adminSecao === 'mural' && (
+                    <div className="space-y-4">
+                      <form
+                        onSubmit={adminSalvarAvisoMural}
+                        className="bg-gray-50 border border-gray-200 p-3.5 rounded-xl space-y-2.5"
+                      >
+                        <h3 className="text-xs font-bold text-grafite">
+                          {adminAvisoEditId ? '✏️ Editar Aviso do Mural' : '📢 Novo Aviso no Feed'}
+                        </h3>
+
+                        <input
+                          type="text"
+                          required
+                          placeholder="Título do aviso (ex: Reposição de Pães Frescos!)"
+                          value={adminAvisoTitulo}
+                          onChange={(e) => setAdminAvisoTitulo(e.target.value)}
+                          className="w-full p-2 border rounded-xl text-xs bg-white"
+                        />
+
+                        <textarea
+                          rows={3}
+                          required
+                          placeholder="Escreva o comunicado para os moradores..."
+                          value={adminAvisoConteudo}
+                          onChange={(e) => setAdminAvisoConteudo(e.target.value)}
+                          className="w-full p-2 border rounded-xl text-xs bg-white"
+                        />
+
+                        <div className="space-y-1.5">
+                          <label className="block text-[11px] font-bold text-gray-600">
+                            Imagem do Aviso (Opcional - ajusta automaticamente ao feed)
+                          </label>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0] || null;
+                              setAdminAvisoFotoFile(file);
+                              if (file) {
+                                setAdminAvisoFotoPreview(URL.createObjectURL(file));
+                              }
+                            }}
+                            className="w-full text-[11px]"
+                          />
+                          {adminAvisoFotoPreview && (
+                            <div className="relative">
+                              <img
+                                src={adminAvisoFotoPreview}
+                                alt="Preview aviso"
+                                className="w-full max-h-48 object-contain rounded-lg border bg-white"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setAdminAvisoFotoFile(null);
+                                  setAdminAvisoFotoPreview(null);
+                                }}
+                                className="mt-1 text-[10px] text-red-600 font-bold underline"
+                              >
+                                Remover imagem
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex gap-2">
+                          {adminAvisoEditId && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAdminAvisoEditId(null);
+                                setAdminAvisoTitulo('');
+                                setAdminAvisoConteudo('');
+                                setAdminAvisoFotoFile(null);
+                                setAdminAvisoFotoPreview(null);
+                              }}
+                              className="flex-1 py-2 rounded-xl text-xs font-bold bg-gray-200 text-gray-700"
+                            >
+                              Cancelar
+                            </button>
+                          )}
+                          <button
+                            type="submit"
+                            disabled={carregando}
+                            className="flex-1 py-2 rounded-xl text-xs font-bold bg-floresta text-white"
+                          >
+                            {carregando
+                              ? 'Salvando...'
+                              : adminAvisoEditId
+                              ? 'Salvar Alterações'
+                              : 'Publicar no Feed'}
+                          </button>
+                        </div>
+                      </form>
+
+                      {/* Lista de Avisos Publicados */}
+                      <div className="space-y-2">
+                        {avisosLista.map((av) => (
+                          <div
+                            key={av.id}
+                            className="p-3 bg-white border border-gray-200 rounded-xl text-xs space-y-2"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <p className="font-bold text-grafite">{av.titulo}</p>
+                                <p className="text-[11px] text-gray-600 line-clamp-2">{av.conteudo}</p>
+                              </div>
+                              {av.imagem_url && (
+                                <img
+                                  src={av.imagem_url}
+                                  alt={av.titulo}
+                                  className="w-12 h-12 rounded-lg object-cover shrink-0 border"
+                                />
+                              )}
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setAdminAvisoEditId(av.id);
+                                  setAdminAvisoTitulo(av.titulo);
+                                  setAdminAvisoConteudo(av.conteudo);
+                                  setAdminAvisoFotoPreview(av.imagem_url || null);
+                                  setAdminAvisoFotoFile(null);
+                                }}
+                                className="py-1.5 rounded-lg font-bold text-[11px] bg-gray-100 text-grafite"
+                              >
+                                Editar Aviso
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => adminExcluirAvisoMural(av.id)}
+                                className="py-1.5 rounded-lg font-bold text-[11px] bg-red-50 text-red-600"
+                              >
+                                Remover
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           )}
         </div>
       </div>
+
+      {/* ===================================================================== */}
+      {/* MODAL ADMIN: EDITAR DADOS OU VER/REMOVER FOTO DO MORADOR              */}
+      {/* ===================================================================== */}
+      {adminEditandoMorador && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4">
+            <h3 className="font-bold text-base text-grafite">
+              {adminFotoAmpliadaUrl ? 'Foto Facial do Morador' : 'Editar Dados do Morador'}
+            </h3>
+
+            {adminFotoAmpliadaUrl ? (
+              <div className="space-y-3 text-center">
+                <p className="text-xs font-bold text-gray-700">{adminEditandoMorador.nome_completo}</p>
+                <img
+                  src={adminFotoAmpliadaUrl}
+                  alt="Selfie Morador"
+                  className="w-64 h-64 mx-auto object-cover rounded-2xl border-2 border-floresta"
+                />
+                <button
+                  type="button"
+                  onClick={() => adminRemoverFotoMorador(adminEditandoMorador)}
+                  disabled={carregando}
+                  className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 rounded-xl text-xs"
+                >
+                  🗑️ Remover Foto (Solicitar Nova Selfie)
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={adminSalvarEdicaoMorador} className="space-y-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-600 mb-1">Nome Completo</label>
+                  <input
+                    type="text"
+                    required
+                    value={adminEditNome}
+                    onChange={(e) => setAdminEditNome(formatarNomeTitleCase(e.target.value))}
+                    className="w-full p-2.5 border rounded-xl text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-600 mb-1">WhatsApp</label>
+                  <input
+                    type="text"
+                    value={adminEditWhatsapp}
+                    onChange={(e) => setAdminEditWhatsapp(e.target.value)}
+                    className="w-full p-2.5 border rounded-xl text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-600 mb-1">Unidade / Endereço</label>
+                  <input
+                    type="text"
+                    value={adminEditUnidade}
+                    onChange={(e) => setAdminEditUnidade(e.target.value)}
+                    className="w-full p-2.5 border rounded-xl text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-600 mb-1">Status de Acesso</label>
+                  <select
+                    value={adminEditStatus}
+                    onChange={(e) => setAdminEditStatus(e.target.value)}
+                    className="w-full p-2.5 border rounded-xl text-xs bg-white"
+                  >
+                    <option value="aprovado">Aprovado (Ativo)</option>
+                    <option value="bloqueado">Bloqueado</option>
+                    <option value="pendente_aprovacao">Pendente de Aprovação</option>
+                  </select>
+                </div>
+                <button
+                  type="submit"
+                  disabled={carregando}
+                  className="w-full bg-floresta text-white font-bold py-2.5 rounded-xl text-xs"
+                >
+                  {carregando ? 'Salvando...' : 'Salvar Alterações'}
+                </button>
+              </form>
+            )}
+
+            <button
+              type="button"
+              onClick={() => {
+                setAdminEditandoMorador(null);
+                setAdminFotoAmpliadaUrl(null);
+              }}
+              className="w-full text-xs text-gray-500 py-1"
+            >
+              Fechar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* MODAL NOVO ANÚNCIO NOS CLASSIFICADOS                                  */}
+      {/* ===================================================================== */}
+      {modalAtivo === 'novo_anuncio' && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <form
+            onSubmit={publicarNovoAnuncio}
+            className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-3 my-auto"
+          >
+            <h3 className="font-bold text-base text-grafite">Novo Anúncio nos Classificados</h3>
+
+            <div>
+              <label className="block text-[11px] font-bold text-gray-600 mb-1">
+                Nome do Produto ou Serviço *
+              </label>
+              <input
+                type="text"
+                required
+                placeholder="Ex: Bolo de Cenoura Caseiro, Bicicleta Aro 20..."
+                value={anuncioTitulo}
+                onChange={(e) => setAnuncioTitulo(formatarNomeTitleCase(e.target.value))}
+                className="w-full p-2.5 border rounded-xl text-xs"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-[11px] font-bold text-gray-600 mb-1">Categoria *</label>
+                <select
+                  value={anuncioTipo}
+                  onChange={(e) => setAnuncioTipo(e.target.value)}
+                  className="w-full p-2.5 border rounded-xl text-xs bg-white"
+                >
+                  {CATEGORIAS_CLASSIFICADOS.filter((c) => c !== 'Todos').map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-gray-600 mb-1">Condição *</label>
+                <select
+                  value={anuncioCondicao}
+                  onChange={(e) => setAnuncioCondicao(e.target.value)}
+                  className="w-full p-2.5 border rounded-xl text-xs bg-white"
+                >
+                  {CONDICOES_ANUNCIO.map((cond) => (
+                    <option key={cond} value={cond}>
+                      {cond}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-[11px] font-bold text-gray-600 mb-1">Preço (R$)</label>
+                <input
+                  type="text"
+                  placeholder="0,00 (0 = A combinar)"
+                  value={anuncioPreco}
+                  onChange={(e) => setAnuncioPreco(formatarMoedaInput(e.target.value))}
+                  className="w-full p-2.5 border rounded-xl text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-gray-600 mb-1">
+                  WhatsApp de Contato *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="41999999999"
+                  value={anuncioWhatsapp}
+                  onChange={(e) => setAnuncioWhatsapp(e.target.value)}
+                  className="w-full p-2.5 border rounded-xl text-xs"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold text-gray-600 mb-1">Descrição *</label>
+              <textarea
+                rows={3}
+                required
+                placeholder="Detalhes, sabores, medidas, horários de entrega na Vila..."
+                value={anuncioDescricao}
+                onChange={(e) => setAnuncioDescricao(e.target.value)}
+                className="w-full p-2.5 border rounded-xl text-xs"
+              />
+            </div>
+
+            <div className="border border-dashed border-gray-300 rounded-xl p-3 bg-gray-50 space-y-2">
+              <label className="block text-[11px] font-bold text-gray-700">
+                📷 Foto do Anúncio (Opcional)
+              </label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                  const file = e.target.files?.[0] || null;
+                  setAnuncioFotoFile(file);
+                  if (file) setAnuncioFotoPreview(URL.createObjectURL(file));
+                }}
+                className="w-full text-[11px]"
+              />
+              {anuncioFotoPreview && (
+                <img
+                  src={anuncioFotoPreview}
+                  alt="Preview anúncio"
+                  className="w-full max-h-40 object-contain rounded-lg border bg-white"
+                />
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setAnuncioFotoFile(null);
+                  setAnuncioFotoPreview(null);
+                  setModalAtivo(null);
+                }}
+                className="bg-gray-100 text-gray-700 font-bold py-2.5 rounded-xl text-xs"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={carregando}
+                className="bg-floresta text-white font-bold py-2.5 rounded-xl text-xs"
+              >
+                {carregando ? 'Publicando...' : 'Publicar Anúncio'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* ===================================================================== */}
       {/* MODAL 1: MINHA SELFIE (AMPLIADA PARA AVALIAR QUALIDADE OU TROCAR)     */}
@@ -1959,7 +3249,7 @@ export default function VilaMarketApp() {
         </div>
       )}
 
-      {/* MODAL 4: ADICIONAR DEPENDENTE */}
+      {/* MODAL 4: ADICIONAR DEPENDENTE (COM TITLE CASE E UUID CORRIGIDO) */}
       {modalAtivo === 'novo_dependente' && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
           <form
@@ -1975,7 +3265,7 @@ export default function VilaMarketApp() {
               required
               placeholder="Nome Completo do Dependente"
               value={depNome}
-              onChange={(e) => setDepNome(e.target.value)}
+              onChange={(e) => setDepNome(formatarNomeTitleCase(e.target.value))}
               className="w-full p-2.5 border rounded-xl text-xs"
             />
             <div className="grid grid-cols-2 gap-2">
@@ -2204,57 +3494,74 @@ export default function VilaMarketApp() {
         </div>
       )}
 
-      {/* 3. BARRA DE NAVEGAÇÃO INFERIOR FIXA */}
+      {/* BARRA DE NAVEGAÇÃO INFERIOR (CONVENÇÕES DE DESIGN UX: HIT TARGET ~56x48px) */}
       {aba === 'painel' && usuarioLogado && (
-        <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg z-40">
-          <div
-            className={`max-w-md mx-auto grid ${
-              roleUsuario === 'admin' ? 'grid-cols-4' : 'grid-cols-3'
-            } py-2`}
-          >
+        <nav className="fixed bottom-3 left-0 right-0 px-4 z-40 pointer-events-none">
+          <div className="max-w-md mx-auto bg-white/95 backdrop-blur border border-gray-200 shadow-lg rounded-2xl px-2 py-1.5 flex items-center justify-around pointer-events-auto">
             <button
               type="button"
               onClick={() => setAbaInferior('inicio')}
-              className={`flex flex-col items-center justify-center py-1 ${
-                abaInferior === 'inicio' ? 'text-floresta font-bold' : 'text-gray-400'
+              className={`min-w-[56px] min-h-[48px] px-2.5 py-1.5 rounded-xl flex flex-col items-center justify-center transition ${
+                abaInferior === 'inicio'
+                  ? 'bg-emerald-50 text-floresta font-bold'
+                  : 'text-gray-500 hover:bg-gray-50'
               }`}
             >
-              <span className="text-lg">🏠</span>
-              <span className="text-[11px]">Início</span>
+              <span className="text-base leading-none">🏠</span>
+              <span className="text-[10px] mt-1">Início</span>
             </button>
 
             <button
               type="button"
               onClick={() => setAbaInferior('mural')}
-              className={`flex flex-col items-center justify-center py-1 ${
-                abaInferior === 'mural' ? 'text-floresta font-bold' : 'text-gray-400'
+              className={`min-w-[56px] min-h-[48px] px-2.5 py-1.5 rounded-xl flex flex-col items-center justify-center transition ${
+                abaInferior === 'mural'
+                  ? 'bg-emerald-50 text-floresta font-bold'
+                  : 'text-gray-500 hover:bg-gray-50'
               }`}
             >
-              <span className="text-lg">📢</span>
-              <span className="text-[11px]">Mural/Classificados</span>
+              <span className="text-base leading-none">📢</span>
+              <span className="text-[10px] mt-1">Mural</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setAbaInferior('ajuda')}
+              className={`min-w-[56px] min-h-[48px] px-2.5 py-1.5 rounded-xl flex flex-col items-center justify-center transition ${
+                abaInferior === 'ajuda'
+                  ? 'bg-emerald-50 text-floresta font-bold'
+                  : 'text-gray-500 hover:bg-gray-50'
+              }`}
+            >
+              <span className="text-base leading-none">❓</span>
+              <span className="text-[10px] mt-1">Ajuda</span>
             </button>
 
             <button
               type="button"
               onClick={() => setAbaInferior('perfil')}
-              className={`flex flex-col items-center justify-center py-1 ${
-                abaInferior === 'perfil' ? 'text-floresta font-bold' : 'text-gray-400'
+              className={`min-w-[56px] min-h-[48px] px-2.5 py-1.5 rounded-xl flex flex-col items-center justify-center transition ${
+                abaInferior === 'perfil'
+                  ? 'bg-emerald-50 text-floresta font-bold'
+                  : 'text-gray-500 hover:bg-gray-50'
               }`}
             >
-              <span className="text-lg">👤</span>
-              <span className="text-[11px]">Perfil/Sair</span>
+              <span className="text-base leading-none">👤</span>
+              <span className="text-[10px] mt-1">Perfil</span>
             </button>
 
             {roleUsuario === 'admin' && (
               <button
                 type="button"
                 onClick={() => setAbaInferior('admin')}
-                className={`flex flex-col items-center justify-center py-1 ${
-                  abaInferior === 'admin' ? 'text-floresta font-bold' : 'text-gray-400'
+                className={`min-w-[56px] min-h-[48px] px-2.5 py-1.5 rounded-xl flex flex-col items-center justify-center transition ${
+                  abaInferior === 'admin'
+                    ? 'bg-emerald-50 text-floresta font-bold'
+                    : 'text-gray-500 hover:bg-gray-50'
                 }`}
               >
-                <span className="text-lg">⚙️</span>
-                <span className="text-[11px]">Admin</span>
+                <span className="text-base leading-none">⚙️</span>
+                <span className="text-[10px] mt-1">Admin</span>
               </button>
             )}
           </div>
