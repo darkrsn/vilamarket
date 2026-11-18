@@ -62,6 +62,16 @@ function converterMoedaParaNumero(valorFormatado: string): number {
   return isNaN(num) ? 0 : num;
 }
 
+// Formata visualmente como xxx.xxx.xxx-xx e limita estritamente a 11 números
+function formatarCPFVisual(valor: string): string {
+  const apenasNumeros = valor.replace(/\D/g, '').slice(0, 11);
+
+  return apenasNumeros
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+}
+
 export default function VilaMarketApp() {
   const [aba, setAba] = useState<'login' | 'cadastro' | 'confirmar_wa' | 'esqueci_pin' | 'painel'>('login');
   const [abaInferior, setAbaInferior] = useState<
@@ -881,14 +891,19 @@ export default function VilaMarketApp() {
   }
 
   // =========================================================================
-  // LOGIN, CADASTRO E WHATSAPP
+  // LOGIN, CADASTRO E WHATSAPP (ENVIA APENAS OS 11 NÚMEROS LIMPOS AO BANCO)
   // =========================================================================
   async function fazerLogin(e: React.FormEvent) {
     e.preventDefault();
-    setCarregando(true);
     setMensagem(null);
 
     const cpfLimpo = cpf.replace(/\D/g, '');
+    if (cpfLimpo.length !== 11) {
+      setMensagem({ tipo: 'erro', texto: 'Digite os 11 dígitos completos do CPF.' });
+      return;
+    }
+
+    setCarregando(true);
     const { data, error } = await supabase.rpc('validar_cpf_pin', {
       p_cpf: cpfLimpo,
       p_pin: pin,
@@ -912,6 +927,12 @@ export default function VilaMarketApp() {
 
   async function realizarCadastro(e: React.FormEvent) {
     e.preventDefault();
+    const cpfLimpo = cpf.replace(/\D/g, '');
+    if (cpfLimpo.length !== 11) {
+      setMensagem({ tipo: 'erro', texto: 'Digite os 11 dígitos completos do CPF.' });
+      return;
+    }
+
     if (!aceiteLgpdTitular) {
       setMensagem({
         tipo: 'erro',
@@ -923,7 +944,6 @@ export default function VilaMarketApp() {
     setCarregando(true);
     setMensagem(null);
 
-    const cpfLimpo = cpf.replace(/\D/g, '');
     const waLimpo = whatsapp.replace(/\D/g, '');
     const emailTecnico = `user_${cpfLimpo}@vilamarket.com.br`;
     const senhaAuth = `VM#${pin}#${cpfLimpo.slice(-4)}`;
@@ -1022,10 +1042,16 @@ export default function VilaMarketApp() {
   }
 
   async function pedirCodigoResetPin() {
+    const cpfLimpo = cpf.replace(/\D/g, '');
+    if (cpfLimpo.length !== 11) {
+      setMensagem({ tipo: 'erro', texto: 'Digite os 11 dígitos completos do CPF.' });
+      return;
+    }
+
     setCarregando(true);
     setMensagem(null);
     const { data, error } = await supabase.rpc('solicitar_reset_pin_whatsapp', {
-      p_cpf: cpf.replace(/\D/g, ''),
+      p_cpf: cpfLimpo,
     });
     setCarregando(false);
     if (error || !data?.sucesso) {
@@ -1037,10 +1063,16 @@ export default function VilaMarketApp() {
 
   async function salvarNovoPinWhatsApp(e: React.FormEvent) {
     e.preventDefault();
+    const cpfLimpo = cpf.replace(/\D/g, '');
+    if (cpfLimpo.length !== 11) {
+      setMensagem({ tipo: 'erro', texto: 'Digite os 11 dígitos completos do CPF.' });
+      return;
+    }
+
     setCarregando(true);
     setMensagem(null);
     const { data, error } = await supabase.rpc('confirmar_reset_pin_whatsapp', {
-      p_cpf: cpf.replace(/\D/g, ''),
+      p_cpf: cpfLimpo,
       p_codigo: codigoWa,
       p_novo_pin: novoPin,
     });
@@ -1235,9 +1267,14 @@ export default function VilaMarketApp() {
     return idade;
   }
 
-  // CORREÇÃO DO ERRO invalid input syntax for type uuid: ""
   async function cadastrarDependente(e: React.FormEvent) {
     e.preventDefault();
+    const cpfDepLimpo = depCpf.replace(/\D/g, '');
+    if (cpfDepLimpo.length !== 11) {
+      alert('Digite os 11 dígitos completos do CPF do dependente.');
+      return;
+    }
+
     const idade = calcularIdade(depNascimento);
     if (idade < 12) {
       alert('A idade mínima para cadastro de dependente é de 12 anos.');
@@ -1273,7 +1310,6 @@ export default function VilaMarketApp() {
         throw new Error('Sessão do titular não identificada. Faça login novamente.');
       }
 
-      const cpfDepLimpo = depCpf.replace(/\D/g, '');
       const emailTecnicoDep = `user_${cpfDepLimpo}@vilamarket.com.br`;
       const senhaAuthDep = `VM#${depPin}#${cpfDepLimpo.slice(-4)}`;
 
@@ -1453,8 +1489,9 @@ export default function VilaMarketApp() {
 
     if (adminBuscaMorador.trim()) {
       const q = adminBuscaMorador.toLowerCase();
+      const qNumeros = adminBuscaMorador.replace(/\D/g, '');
       const matchNome = (m.nome_completo || '').toLowerCase().includes(q);
-      const matchCpf = (m.cpf || '').includes(q);
+      const matchCpf = qNumeros ? (m.cpf || '').includes(qNumeros) : (m.cpf || '').includes(q);
       const matchUnidade = (m.unidade_formatada || '').toLowerCase().includes(q);
       if (!matchNome && !matchCpf && !matchUnidade) return false;
     }
@@ -1502,10 +1539,12 @@ export default function VilaMarketApp() {
                 </label>
                 <input
                   type="text"
+                  inputMode="numeric"
+                  maxLength={14}
                   required
-                  placeholder="Apenas números (11 dígitos)"
+                  placeholder="000.000.000-00"
                   value={cpf}
-                  onChange={(e) => setCpf(e.target.value)}
+                  onChange={(e) => setCpf(formatarCPFVisual(e.target.value))}
                   className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-floresta outline-none"
                 />
               </div>
@@ -1516,11 +1555,12 @@ export default function VilaMarketApp() {
                 </label>
                 <input
                   type="password"
+                  inputMode="numeric"
                   maxLength={4}
                   required
                   placeholder="••••"
                   value={pin}
-                  onChange={(e) => setPin(e.target.value)}
+                  onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
                   className="w-full p-3 border rounded-xl text-center text-2xl tracking-widest focus:ring-2 focus:ring-floresta outline-none"
                 />
               </div>
@@ -1556,7 +1596,7 @@ export default function VilaMarketApp() {
             </form>
           )}
 
-          {/* ABA 2: CADASTRO COM TITLE CASE AUTOMÁTICO */}
+          {/* ABA 2: CADASTRO COM TITLE CASE AUTOMÁTICO E MÁSCARA DE CPF */}
           {aba === 'cadastro' && (
             <form onSubmit={realizarCadastro} className="space-y-3">
               <h2 className="font-bold text-lg text-grafite">Novo Cadastro na Vila</h2>
@@ -1573,14 +1613,17 @@ export default function VilaMarketApp() {
               <div className="grid grid-cols-2 gap-2">
                 <input
                   type="text"
+                  inputMode="numeric"
+                  maxLength={14}
                   required
-                  placeholder="CPF (11 números)"
+                  placeholder="000.000.000-00"
                   value={cpf}
-                  onChange={(e) => setCpf(e.target.value)}
+                  onChange={(e) => setCpf(formatarCPFVisual(e.target.value))}
                   className="w-full p-2.5 border rounded-xl text-sm"
                 />
                 <input
                   type="text"
+                  inputMode="numeric"
                   required
                   placeholder="WhatsApp (DDD+Número)"
                   value={whatsapp}
@@ -1676,11 +1719,12 @@ export default function VilaMarketApp() {
                 </label>
                 <input
                   type="password"
+                  inputMode="numeric"
                   maxLength={4}
                   required
                   placeholder="4 dígitos (não use 1234 ou data nasc.)"
                   value={pin}
-                  onChange={(e) => setPin(e.target.value)}
+                  onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
                   className="w-full p-2.5 border rounded-xl text-sm"
                 />
               </div>
@@ -1726,11 +1770,12 @@ export default function VilaMarketApp() {
               </p>
               <input
                 type="text"
+                inputMode="numeric"
                 maxLength={6}
                 required
                 placeholder="000000"
                 value={codigoWa}
-                onChange={(e) => setCodigoWa(e.target.value)}
+                onChange={(e) => setCodigoWa(e.target.value.replace(/\D/g, '').slice(0, 6))}
                 className="w-full p-3 border rounded-xl text-center text-2xl tracking-widest"
               />
               <button
@@ -1750,10 +1795,12 @@ export default function VilaMarketApp() {
               <div className="flex gap-2">
                 <input
                   type="text"
+                  inputMode="numeric"
+                  maxLength={14}
                   required
-                  placeholder="Digite seu CPF"
+                  placeholder="000.000.000-00"
                   value={cpf}
-                  onChange={(e) => setCpf(e.target.value)}
+                  onChange={(e) => setCpf(formatarCPFVisual(e.target.value))}
                   className="flex-1 p-2.5 border rounded-xl text-sm"
                 />
                 <button
@@ -1766,20 +1813,22 @@ export default function VilaMarketApp() {
               </div>
               <input
                 type="text"
+                inputMode="numeric"
                 maxLength={6}
                 required
                 placeholder="Código de 6 dígitos recebido no WhatsApp"
                 value={codigoWa}
-                onChange={(e) => setCodigoWa(e.target.value)}
+                onChange={(e) => setCodigoWa(e.target.value.replace(/\D/g, '').slice(0, 6))}
                 className="w-full p-2.5 border rounded-xl text-sm"
               />
               <input
                 type="password"
+                inputMode="numeric"
                 maxLength={4}
                 required
                 placeholder="Novo PIN de 4 dígitos"
                 value={novoPin}
-                onChange={(e) => setNovoPin(e.target.value)}
+                onChange={(e) => setNovoPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
                 className="w-full p-2.5 border rounded-xl text-sm"
               />
               <button
@@ -1839,7 +1888,6 @@ export default function VilaMarketApp() {
                         </p>
                       </div>
 
-                      {/* Miniatura clicável sem o texto "Ampliar" */}
                       <button
                         type="button"
                         onClick={abrirModalSelfie}
@@ -2035,7 +2083,7 @@ export default function VilaMarketApp() {
                 </div>
               )}
 
-              {/* SUB-ABA CLASSIFICADOS DA VILA (ABA PRÓPRIA AO LADO DO MURAL) */}
+              {/* SUB-ABA CLASSIFICADOS DA VILA */}
               {abaInferior === 'classificados' && !ehMenorDeIdade && (
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
@@ -2053,7 +2101,6 @@ export default function VilaMarketApp() {
                   </div>
 
                   <div className="space-y-3">
-                    {/* Busca e alternador Meus Anúncios */}
                     <div className="flex gap-2">
                       <input
                         type="text"
@@ -2075,7 +2122,6 @@ export default function VilaMarketApp() {
                       </button>
                     </div>
 
-                    {/* Barra horizontal deslizável de categorias */}
                     <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar">
                       {CATEGORIAS_CLASSIFICADOS.map((cat) => (
                         <button
@@ -2398,7 +2444,6 @@ export default function VilaMarketApp() {
                     </span>
                   </div>
 
-                  {/* Navegação interna do Admin */}
                   <div className="grid grid-cols-3 gap-1.5 bg-gray-100 p-1 rounded-xl">
                     <button
                       type="button"
@@ -2493,7 +2538,7 @@ export default function VilaMarketApp() {
                                     {m.unidade_formatada || 'Sem unidade'}
                                   </p>
                                   <p className="text-[10px] text-gray-500">
-                                    CPF: {m.cpf} • WA: {m.whatsapp || 'N/I'}
+                                    CPF: {formatarCPFVisual(m.cpf || '')} • WA: {m.whatsapp || 'N/I'}
                                   </p>
                                 </div>
                               </div>
@@ -3151,29 +3196,32 @@ export default function VilaMarketApp() {
             <h3 className="font-bold text-base text-grafite">Alterar PIN de 4 dígitos</h3>
             <input
               type="password"
+              inputMode="numeric"
               maxLength={4}
               required
               placeholder="PIN Atual (4 dígitos)"
               value={pinAtualTroca}
-              onChange={(e) => setPinAtualTroca(e.target.value.replace(/\D/g, ''))}
+              onChange={(e) => setPinAtualTroca(e.target.value.replace(/\D/g, '').slice(0, 4))}
               className="w-full p-2.5 border rounded-xl text-center text-sm"
             />
             <input
               type="password"
+              inputMode="numeric"
               maxLength={4}
               required
               placeholder="Novo PIN (4 dígitos)"
               value={novoPinTroca}
-              onChange={(e) => setNovoPinTroca(e.target.value.replace(/\D/g, ''))}
+              onChange={(e) => setNovoPinTroca(e.target.value.replace(/\D/g, '').slice(0, 4))}
               className="w-full p-2.5 border rounded-xl text-center text-sm"
             />
             <input
               type="password"
+              inputMode="numeric"
               maxLength={4}
               required
               placeholder="Confirmar Novo PIN"
               value={confirmarNovoPinTroca}
-              onChange={(e) => setConfirmarNovoPinTroca(e.target.value.replace(/\D/g, ''))}
+              onChange={(e) => setConfirmarNovoPinTroca(e.target.value.replace(/\D/g, '').slice(0, 4))}
               className="w-full p-2.5 border rounded-xl text-center text-sm"
             />
             <div className="grid grid-cols-2 gap-2 pt-2">
@@ -3240,7 +3288,7 @@ export default function VilaMarketApp() {
         </div>
       )}
 
-      {/* MODAL 4: ADICIONAR DEPENDENTE (COM TITLE CASE E UUID CORRIGIDO) */}
+      {/* MODAL 4: ADICIONAR DEPENDENTE (COM MÁSCARA DE CPF E TRAVA DE 11 DÍGITOS) */}
       {modalAtivo === 'novo_dependente' && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
           <form
@@ -3262,10 +3310,12 @@ export default function VilaMarketApp() {
             <div className="grid grid-cols-2 gap-2">
               <input
                 type="text"
+                inputMode="numeric"
+                maxLength={14}
                 required
-                placeholder="CPF (11 dígitos)"
+                placeholder="000.000.000-00"
                 value={depCpf}
-                onChange={(e) => setDepCpf(e.target.value)}
+                onChange={(e) => setDepCpf(formatarCPFVisual(e.target.value))}
                 className="w-full p-2.5 border rounded-xl text-xs"
               />
               <input
@@ -3278,11 +3328,12 @@ export default function VilaMarketApp() {
             </div>
             <input
               type="password"
+              inputMode="numeric"
               maxLength={4}
               required
               placeholder="PIN de 4 dígitos do Dependente"
               value={depPin}
-              onChange={(e) => setDepPin(e.target.value.replace(/\D/g, ''))}
+              onChange={(e) => setDepPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
               className="w-full p-2.5 border rounded-xl text-xs"
             />
 
@@ -3456,10 +3507,11 @@ export default function VilaMarketApp() {
               </label>
               <input
                 type="password"
+                inputMode="numeric"
                 maxLength={4}
                 placeholder="••••"
                 value={pinConfirmacaoPix}
-                onChange={(e) => setPinConfirmacaoPix(e.target.value.replace(/\D/g, ''))}
+                onChange={(e) => setPinConfirmacaoPix(e.target.value.replace(/\D/g, '').slice(0, 4))}
                 className="w-full p-2.5 border rounded-xl text-center text-sm tracking-widest"
               />
             </div>
@@ -3485,7 +3537,7 @@ export default function VilaMarketApp() {
         </div>
       )}
 
-      {/* BARRA DE NAVEGAÇÃO INFERIOR (CONVENÇÕES DE DESIGN UX: HIT TARGET ~48x48px) */}
+      {/* BARRA DE NAVEGAÇÃO INFERIOR */}
       {aba === 'painel' && usuarioLogado && (
         <nav className="fixed bottom-3 left-0 right-0 px-2 z-40 pointer-events-none">
           <div className="max-w-md mx-auto bg-white/95 backdrop-blur border border-gray-200 shadow-lg rounded-2xl px-1.5 py-1.5 flex items-center justify-between gap-0.5 pointer-events-auto">
