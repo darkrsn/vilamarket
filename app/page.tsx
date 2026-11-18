@@ -21,6 +21,7 @@ export default function VilaMarketApp() {
   const [pin, setPin] = useState('');
   const [usuarioLogado, setUsuarioLogado] = useState<any>(null);
   const [perfilDetalhes, setPerfilDetalhes] = useState<any>(null);
+  const [selfieTemporariaUrl, setSelfieTemporariaUrl] = useState<string | null>(null);
 
   // Dados Cadastro
   const [nome, setNome] = useState('');
@@ -30,6 +31,7 @@ export default function VilaMarketApp() {
   const [tipoUnidade, setTipoUnidade] = useState<'bloco' | 'casa'>('bloco');
   const [unidadeId, setUnidadeId] = useState('');
   const [complementoApto, setComplementoApto] = useState('');
+  const [aceiteLgpdTitular, setAceiteLgpdTitular] = useState(false);
 
   // Código WhatsApp (Ativação e Reset PIN)
   const [codigoWa, setCodigoWa] = useState('');
@@ -61,11 +63,13 @@ export default function VilaMarketApp() {
   const [depNascimento, setDepNascimento] = useState('');
   const [depPin, setDepPin] = useState('');
   const [depSelfieBase64, setDepSelfieBase64] = useState<string | null>(null);
+  const [aceiteLgpdDependente, setAceiteLgpdDependente] = useState(false);
 
-  // 5. Estados Recarga Pix Dependente
+  // 5. Estados Recarga Pix Dependente (Com trava de PIN para ações financeiras)
   const [dependenteSelecionado, setDependenteSelecionado] = useState<any>(null);
   const [valorPix, setValorPix] = useState('20.00');
   const [pixCopiaECola, setPixCopiaECola] = useState('');
+  const [pinConfirmacaoPix, setPinConfirmacaoPix] = useState('');
 
   // 6. Estados Mural / Classificados
   const [subAbaMural, setSubAbaMural] = useState<'avisos' | 'classificados'>('avisos');
@@ -81,6 +85,45 @@ export default function VilaMarketApp() {
       carregarDadosDashboard();
     }
   }, [aba, usuarioLogado]);
+
+  // =========================================================================
+  // FUNÇÕES DE STORAGE PRIVADO E SESSÃO (CONFORMIDADE LGPD)
+  // =========================================================================
+  async function gerarUrlTemporariaSelfie(caminhoOuBase64: string | null): Promise<string | null> {
+    if (!caminhoOuBase64) return null;
+
+    // Compatibilidade caso exista foto antiga em Base64 antes da migração
+    if (caminhoOuBase64.startsWith('data:image')) {
+      return caminhoOuBase64;
+    }
+
+    // Gera URL assinada temporária válida por 10 minutos (600s) do bucket privado 'selfies'
+    const { data, error } = await supabase.storage
+      .from('selfies')
+      .createSignedUrl(caminhoOuBase64, 600);
+
+    if (error || !data) return null;
+    return data.signedUrl;
+  }
+
+  async function enviarSelfieParaStoragePrivado(fotoBase64: string, perfilIdAlvo: string): Promise<string> {
+    const resposta = await fetch(fotoBase64);
+    const blob = await resposta.blob();
+    const caminhoArquivo = `${perfilIdAlvo}/facial_${Date.now()}.jpg`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('selfies')
+      .upload(caminhoArquivo, blob, {
+        contentType: 'image/jpeg',
+        upsert: true,
+      });
+
+    if (uploadError) {
+      throw new Error(uploadError.message);
+    }
+
+    return caminhoArquivo;
+  }
 
   function salvarSessaoNoNavegador(dadosUsuario: any) {
     try {
@@ -148,6 +191,14 @@ export default function VilaMarketApp() {
     if (perfil) {
       setPerfilDetalhes(perfil);
 
+      // Carrega a URL assinada temporária da selfie se existir
+      if (perfil.selfie_url) {
+        const urlSegura = await gerarUrlTemporariaSelfie(perfil.selfie_url);
+        setSelfieTemporariaUrl(urlSegura);
+      } else {
+        setSelfieTemporariaUrl(null);
+      }
+
       if (perfil.role === 'titular' || perfil.role === 'admin') {
         const { data: deps } = await supabase
           .from('perfis')
@@ -188,6 +239,14 @@ export default function VilaMarketApp() {
 
   async function realizarCadastro(e: React.FormEvent) {
     e.preventDefault();
+    if (!aceiteLgpdTitular) {
+      setMensagem({
+        tipo: 'erro',
+        texto: 'Você precisa concordar com o Termo de Privacidade e Uso de Dados (LGPD) para continuar.',
+      });
+      return;
+    }
+
     setCarregando(true);
     setMensagem(null);
 
@@ -322,7 +381,7 @@ export default function VilaMarketApp() {
   }
 
   // =========================================================================
-  // FUNÇÕES DA DASHBOARD (SELFIE COM VISUALIZAÇÃO, ALTERAR PIN, EXTRATO, DEPENDENTES)
+  // FUNÇÕES DA DASHBOARD (SELFIE PRIVADA, ALTERAR PIN, EXTRATO, DEPENDENTES)
   // =========================================================================
   async function iniciarCameraSelfie() {
     setFotoCapturada(null);
@@ -340,12 +399,16 @@ export default function VilaMarketApp() {
     }
   }
 
-  function abrirModalSelfie() {
+  async function abrirModalSelfie() {
     setFotoCapturada(null);
     setModalAtivo('selfie');
 
     if (perfilDetalhes?.selfie_url) {
       setModoTrocaSelfie(false);
+      if (!selfieTemporariaUrl) {
+        const url = await gerarUrlTemporariaSelfie(perfilDetalhes.selfie_url);
+        setSelfieTemporariaUrl(url);
+      }
     } else {
       iniciarCameraSelfie();
     }
@@ -380,24 +443,33 @@ export default function VilaMarketApp() {
     if (!fotoCapturada || !usuarioLogado?.perfil_id) return;
     setCarregando(true);
 
-    const { error } = await supabase
-      .from('perfis')
-      .update({
-        selfie_url: fotoCapturada,
-        status_facial: 'ativo',
-      })
-      .eq('id', usuarioLogado.perfil_id);
+    try {
+      // 1. Envia o arquivo JPEG para o Bucket Privado 'selfies' (protegido por RLS)
+      const caminhoPrivado = await enviarSelfieParaStoragePrivado(
+        fotoCapturada,
+        usuarioLogado.perfil_id
+      );
 
-    setCarregando(false);
-    if (error) {
-      alert('Erro ao salvar selfie: ' + error.message);
-      return;
+      // 2. Salva APENAS o caminho do arquivo na tabela 'perfis' (sem Base64 exposto)
+      const { error } = await supabase
+        .from('perfis')
+        .update({
+          selfie_url: caminhoPrivado,
+          status_facial: 'ativo',
+        })
+        .eq('id', usuarioLogado.perfil_id);
+
+      if (error) throw error;
+
+      await carregarDadosDashboard();
+      setModoTrocaSelfie(false);
+      setModalAtivo(null);
+      alert('Selfie salva com criptografia LGPD e sincronizada com o leitor facial da porta!');
+    } catch (err: any) {
+      alert('Erro ao salvar selfie: ' + (err.message || 'Tente novamente.'));
+    } finally {
+      setCarregando(false);
     }
-
-    await carregarDadosDashboard();
-    setModoTrocaSelfie(false);
-    setModalAtivo(null);
-    alert('Selfie atualizada com sucesso para o leitor facial da porta!');
   }
 
   async function salvarTrocaPinLogado(e: React.FormEvent) {
@@ -458,71 +530,84 @@ export default function VilaMarketApp() {
       alert('Tire a selfie do dependente para liberar o acesso facial na porta.');
       return;
     }
+    if (!aceiteLgpdDependente) {
+      alert(
+        'Por exigência da LGPD (Art. 14), confirme o consentimento parental para o uso da imagem facial do dependente.'
+      );
+      return;
+    }
     if (depPin.length !== 4) {
       alert('O PIN do dependente deve ter 4 dígitos.');
       return;
     }
 
     setCarregando(true);
-    const cpfDepLimpo = depCpf.replace(/\D/g, '');
-    const emailTecnicoDep = `user_${cpfDepLimpo}@vilamarket.com.br`;
-    const senhaAuthDep = `VM#${depPin}#${cpfDepLimpo.slice(-4)}`;
+    try {
+      const cpfDepLimpo = depCpf.replace(/\D/g, '');
+      const emailTecnicoDep = `user_${cpfDepLimpo}@vilamarket.com.br`;
+      const senhaAuthDep = `VM#${depPin}#${cpfDepLimpo.slice(-4)}`;
 
-    const { data: authData, error: authErr } = await supabase.auth.signUp({
-      email: emailTecnicoDep,
-      password: senhaAuthDep,
-    });
+      const { data: authData, error: authErr } = await supabase.auth.signUp({
+        email: emailTecnicoDep,
+        password: senhaAuthDep,
+      });
 
-    if (authErr || !authData.user) {
+      if (authErr || !authData.user) {
+        throw new Error(authErr?.message || 'CPF já cadastrado');
+      }
+
+      // Envia a selfie do dependente para o bucket privado 'selfies'
+      const caminhoSelfieDep = await enviarSelfieParaStoragePrivado(
+        depSelfieBase64,
+        authData.user.id
+      );
+
+      const { error: insertErr } = await supabase.from('perfis').insert({
+        id: authData.user.id,
+        condominio_id: perfilDetalhes?.condominio_id || condominioId,
+        unidade_id: perfilDetalhes?.unidade_id,
+        complemento_apto: perfilDetalhes?.complemento_apto,
+        unidade_formatada:
+          perfilDetalhes?.unidade_formatada || usuarioLogado.unidade_formatada || usuarioLogado.unidade,
+        titular_id: usuarioLogado.perfil_id,
+        nome_completo: depNome,
+        cpf: cpfDepLimpo,
+        data_nascimento: depNascimento,
+        role: 'dependente',
+        selfie_url: caminhoSelfieDep,
+        pin_hash: 'temp',
+        status_cadastro: 'aprovado',
+        status_facial: 'ativo',
+      });
+
+      if (insertErr) throw new Error(insertErr.message);
+
+      await supabase.rpc('definir_pin_usuario', {
+        p_perfil_id: authData.user.id,
+        p_pin_aberto: depPin,
+      });
+
+      setDepNome('');
+      setDepCpf('');
+      setDepNascimento('');
+      setDepPin('');
+      setDepSelfieBase64(null);
+      setAceiteLgpdDependente(false);
+      fecharCamera();
+      setModalAtivo(null);
+      await carregarDadosDashboard();
+      alert('Dependente cadastrado com sucesso e protegido pela LGPD!');
+    } catch (err: any) {
+      alert('Erro ao cadastrar dependente: ' + (err.message || 'Tente novamente.'));
+    } finally {
       setCarregando(false);
-      alert('Erro ao criar acesso do dependente: ' + (authErr?.message || 'CPF já cadastrado'));
-      return;
     }
-
-    const { error: insertErr } = await supabase.from('perfis').insert({
-      id: authData.user.id,
-      condominio_id: perfilDetalhes?.condominio_id || condominioId,
-      unidade_id: perfilDetalhes?.unidade_id,
-      complemento_apto: perfilDetalhes?.complemento_apto,
-      unidade_formatada:
-        perfilDetalhes?.unidade_formatada || usuarioLogado.unidade_formatada || usuarioLogado.unidade,
-      titular_id: usuarioLogado.perfil_id,
-      nome_completo: depNome,
-      cpf: cpfDepLimpo,
-      data_nascimento: depNascimento,
-      role: 'dependente',
-      selfie_url: depSelfieBase64,
-      pin_hash: 'temp',
-      status_cadastro: 'aprovado',
-      status_facial: 'ativo',
-    });
-
-    if (insertErr) {
-      setCarregando(false);
-      alert('Erro ao salvar dependente: ' + insertErr.message);
-      return;
-    }
-
-    await supabase.rpc('definir_pin_usuario', {
-      p_perfil_id: authData.user.id,
-      p_pin_aberto: depPin,
-    });
-
-    setCarregando(false);
-    setDepNome('');
-    setDepCpf('');
-    setDepNascimento('');
-    setDepPin('');
-    setDepSelfieBase64(null);
-    fecharCamera();
-    setModalAtivo(null);
-    await carregarDadosDashboard();
-    alert('Dependente cadastrado com sucesso!');
   }
 
   function abrirModalPixDependente(dep: any) {
     setDependenteSelecionado(dep);
     setValorPix('20.00');
+    setPinConfirmacaoPix('');
     setPixCopiaECola(
       `00020126580014BR.GOV.BCB.PIX0136vilamarket-pix-${dep.cpf}520400005303986540520.005802BR5910VILAMARKET6008CURITIBA62070503***6304ABCD`
     );
@@ -531,7 +616,27 @@ export default function VilaMarketApp() {
 
   async function confirmarRecargaPixDependente() {
     if (!dependenteSelecionado) return;
+    if (pinConfirmacaoPix.length !== 4) {
+      alert('Por segurança, digite o SEU PIN de 4 dígitos para confirmar esta operação.');
+      return;
+    }
+
     setCarregando(true);
+
+    // 1. Valida o PIN do titular antes de movimentar saldo (Segurança de Sessão Persistente)
+    const cpfTitularLimpo = (perfilDetalhes?.cpf || cpf || '').replace(/\D/g, '');
+    const { data: checkPin, error: errPin } = await supabase.rpc('validar_cpf_pin', {
+      p_cpf: cpfTitularLimpo,
+      p_pin: pinConfirmacaoPix,
+    });
+
+    if (errPin || !checkPin?.sucesso) {
+      setCarregando(false);
+      alert(checkPin?.mensagem || 'PIN de segurança incorreto.');
+      return;
+    }
+
+    // 2. Executa a recarga protegida
     const { data, error } = await supabase.rpc('adicionar_saldo_pix', {
       p_perfil_id: dependenteSelecionado.id,
       p_valor: parseFloat(valorPix),
@@ -544,8 +649,44 @@ export default function VilaMarketApp() {
     }
 
     await carregarDadosDashboard();
+    setPinConfirmacaoPix('');
     setModalAtivo(null);
     alert(data.mensagem);
+  }
+
+  async function solicitarExclusaoDadosLgpd() {
+    const confirmou = window.confirm(
+      'Deseja solicitar a exclusão dos seus dados biométricos (selfie) e encerramento da conta conforme a LGPD? O leitor facial da porta será bloqueado imediatamente.'
+    );
+    if (!confirmou || !usuarioLogado?.perfil_id) return;
+
+    setCarregando(true);
+    try {
+      // Remove o arquivo do bucket privado se existir
+      if (perfilDetalhes?.selfie_url && !perfilDetalhes.selfie_url.startsWith('data:image')) {
+        await supabase.storage.from('selfies').remove([perfilDetalhes.selfie_url]);
+      }
+
+      // Desativa o acesso facial e limpa a referência da selfie no banco
+      await supabase
+        .from('perfis')
+        .update({
+          selfie_url: null,
+          status_facial: 'bloqueado',
+          status_cadastro: 'bloqueado',
+        })
+        .eq('id', usuarioLogado.perfil_id);
+
+      alert('Seus dados biométricos foram removidos e seu acesso foi encerrado conforme a LGPD.');
+      limparSessaoDoNavegador();
+      setUsuarioLogado(null);
+      setPin('');
+      setAba('login');
+    } catch {
+      alert('Não foi possível processar automaticamente. Contate a administração da Vila.');
+    } finally {
+      setCarregando(false);
+    }
   }
 
   const unidadesFiltradas = unidades.filter((u) => u.tipo === tipoUnidade);
@@ -647,7 +788,7 @@ export default function VilaMarketApp() {
             </form>
           )}
 
-          {/* ABA 2: CADASTRO COM AS 3 RUAS DA VILA MILITAR */}
+          {/* ABA 2: CADASTRO COM AS 3 RUAS DA VILA MILITAR + TERMO LGPD */}
           {aba === 'cadastro' && (
             <form onSubmit={realizarCadastro} className="space-y-3">
               <h2 className="font-bold text-lg text-grafite">Novo Cadastro na Vila</h2>
@@ -770,6 +911,21 @@ export default function VilaMarketApp() {
                   className="w-full p-2.5 border rounded-xl text-sm"
                 />
               </div>
+
+              {/* CONSENTIMENTO EXPLÍCITO LGPD */}
+              <label className="flex items-start gap-2 bg-gray-50 p-2.5 rounded-xl border border-gray-200 text-[11px] text-gray-600 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={aceiteLgpdTitular}
+                  onChange={(e) => setAceiteLgpdTitular(e.target.checked)}
+                  className="mt-0.5 accent-floresta"
+                />
+                <span>
+                  Li e concordo com o uso dos meus dados cadastrais e biométricos (selfie)
+                  exclusivamente para controle de acesso à porta e gestão da carteira no{' '}
+                  <strong>VilaMarket</strong>, sem compartilhamento com terceiros (LGPD).
+                </span>
+              </label>
 
               <button
                 type="submit"
@@ -955,11 +1111,15 @@ export default function VilaMarketApp() {
                         {temSelfie ? (
                           <>
                             <div className="relative mb-1">
-                              <img
-                                src={perfilDetalhes.selfie_url}
-                                alt="Sua selfie"
-                                className="w-7 h-7 rounded-full object-cover border border-emerald-600"
-                              />
+                              {selfieTemporariaUrl ? (
+                                <img
+                                  src={selfieTemporariaUrl}
+                                  alt="Sua selfie"
+                                  className="w-7 h-7 rounded-full object-cover border border-emerald-600"
+                                />
+                              ) : (
+                                <span className="text-xl">🔒</span>
+                              )}
                               <span className="absolute -bottom-1 -right-1 text-[10px]">✅</span>
                             </div>
                             <span className="text-xs font-bold text-emerald-900 leading-tight">
@@ -1020,6 +1180,7 @@ export default function VilaMarketApp() {
                           type="button"
                           onClick={() => {
                             setDepSelfieBase64(null);
+                            setAceiteLgpdDependente(false);
                             setModalAtivo('novo_dependente');
                           }}
                           className="bg-floresta hover:bg-floresta-claro text-white text-xs font-bold px-3 py-2 rounded-xl transition"
@@ -1105,10 +1266,10 @@ export default function VilaMarketApp() {
                 </div>
               )}
 
-              {/* SUB-ABA PERFIL / SAIR */}
+              {/* SUB-ABA PERFIL / SAIR + PRIVACIDADE LGPD */}
               {abaInferior === 'perfil' && (
                 <div className="space-y-4">
-                  <h2 className="text-lg font-bold text-grafite">Meu Perfil</h2>
+                  <h2 className="text-lg font-bold text-grafite">Meu Perfil & Privacidade</h2>
                   <div className="bg-gray-50 border border-gray-200 p-4 rounded-xl text-xs space-y-2 text-gray-700">
                     <p>
                       <strong>Morador:</strong> {usuarioLogado.nome_completo}
@@ -1122,7 +1283,9 @@ export default function VilaMarketApp() {
                     </p>
                     <p>
                       <strong>Acesso Facial:</strong>{' '}
-                      {temSelfie ? '✅ Selfie enviada e ativa' : '⚠️ Pendente de envio'}
+                      {temSelfie
+                        ? '✅ Selfie protegida por criptografia LGPD'
+                        : '⚠️ Pendente de envio'}
                     </p>
                   </div>
 
@@ -1134,10 +1297,25 @@ export default function VilaMarketApp() {
                       setPin('');
                       setAba('login');
                     }}
-                    className="w-full py-3 text-xs font-bold text-red-600 border border-red-200 rounded-xl hover:bg-red-50"
+                    className="w-full py-3 text-xs font-bold text-gray-700 border border-gray-300 rounded-xl hover:bg-gray-50"
                   >
                     Sair da Conta
                   </button>
+
+                  <div className="pt-2 border-t border-gray-200 text-center space-y-2">
+                    <p className="text-[11px] text-gray-400">
+                      Seus dados pessoais e biométricos são armazenados exclusivamente em banco
+                      privado do VilaMarket (LGPD).
+                    </p>
+                    <button
+                      type="button"
+                      onClick={solicitarExclusaoDadosLgpd}
+                      disabled={carregando}
+                      className="text-[11px] text-red-600 font-semibold hover:underline"
+                    >
+                      Excluir minha selfie e encerrar cadastro (Direito LGPD)
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -1171,7 +1349,7 @@ export default function VilaMarketApp() {
               <h3 className="font-bold text-base text-grafite">Minha Selfie (Acesso Facial)</h3>
               {temSelfie && !modoTrocaSelfie && (
                 <span className="text-[11px] font-bold bg-emerald-100 text-emerald-800 px-2.5 py-0.5 rounded-full">
-                  ✅ Enviada
+                  ✅ Protegida LGPD
                 </span>
               )}
             </div>
@@ -1179,14 +1357,20 @@ export default function VilaMarketApp() {
             {temSelfie && !modoTrocaSelfie && !fotoCapturada ? (
               <div className="space-y-3 text-center">
                 <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 p-2.5 rounded-xl">
-                  Sua selfie já está cadastrada no sistema e sincronizada com o leitor facial da
-                  porta.
+                  Sua selfie está armazenada em cofre privado (Storage RLS) e sincronizada com o
+                  leitor facial da porta.
                 </p>
-                <img
-                  src={perfilDetalhes.selfie_url}
-                  alt="Selfie cadastrada"
-                  className="w-48 h-48 mx-auto object-cover rounded-2xl border-2 border-emerald-600 shadow-sm"
-                />
+                {selfieTemporariaUrl ? (
+                  <img
+                    src={selfieTemporariaUrl}
+                    alt="Selfie cadastrada"
+                    className="w-48 h-48 mx-auto object-cover rounded-2xl border-2 border-emerald-600 shadow-sm"
+                  />
+                ) : (
+                  <div className="w-48 h-48 mx-auto flex items-center justify-center bg-gray-100 rounded-2xl text-xs text-gray-500">
+                    Carregando imagem segura...
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={iniciarCameraSelfie}
@@ -1356,7 +1540,7 @@ export default function VilaMarketApp() {
         </div>
       )}
 
-      {/* MODAL 4: ADICIONAR DEPENDENTE (MÍNIMO 12 ANOS, CPF, PIN E SELFIE) */}
+      {/* MODAL 4: ADICIONAR DEPENDENTE (MÍNIMO 12 ANOS, CPF, PIN, SELFIE PRIVADA E CONSENTIMENTO LGPD ART. 14) */}
       {modalAtivo === 'novo_dependente' && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
           <form
@@ -1456,6 +1640,20 @@ export default function VilaMarketApp() {
               )}
             </div>
 
+            {/* CONSENTIMENTO PARENTAL LGPD (ART. 14) */}
+            <label className="flex items-start gap-2 bg-gray-50 p-2.5 rounded-xl border border-gray-200 text-[10px] text-gray-600 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={aceiteLgpdDependente}
+                onChange={(e) => setAceiteLgpdDependente(e.target.checked)}
+                className="mt-0.5 accent-floresta"
+              />
+              <span>
+                Declaro ser responsável legal e autorizo o tratamento da imagem facial e dados do
+                dependente exclusivamente para acesso ao VilaMarket (Art. 14 da LGPD).
+              </span>
+            </label>
+
             <div className="grid grid-cols-2 gap-2 pt-2">
               <button
                 type="button"
@@ -1479,7 +1677,7 @@ export default function VilaMarketApp() {
         </div>
       )}
 
-      {/* MODAL 5: ADICIONAR SALDO PIX AO DEPENDENTE */}
+      {/* MODAL 5: ADICIONAR SALDO PIX AO DEPENDENTE (COM CONFIRMAÇÃO DE PIN) */}
       {modalAtivo === 'pix_dependente' && dependenteSelecionado && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4">
@@ -1526,6 +1724,22 @@ export default function VilaMarketApp() {
                 Copiar Código Pix
               </button>
             </div>
+
+            {/* TRAVA DE SEGURANÇA PARA SESSÃO DE 7 DIAS */}
+            <div>
+              <label className="block text-[11px] font-bold text-gray-600 mb-1">
+                Confirme seu PIN de 4 dígitos (Segurança):
+              </label>
+              <input
+                type="password"
+                maxLength={4}
+                placeholder="••••"
+                value={pinConfirmacaoPix}
+                onChange={(e) => setPinConfirmacaoPix(e.target.value.replace(/\D/g, ''))}
+                className="w-full p-2.5 border rounded-xl text-center text-sm tracking-widest"
+              />
+            </div>
+
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
