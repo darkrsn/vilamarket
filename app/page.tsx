@@ -132,7 +132,6 @@ export default function VilaMarketApp() {
       };
     }
 
-    // Recorte central 1:1 idêntico à foto final
     const menorLado = Math.min(video.videoWidth, video.videoHeight);
     const sx = (video.videoWidth - menorLado) / 2;
     const sy = (video.videoHeight - menorLado) / 2;
@@ -189,7 +188,7 @@ export default function VilaMarketApp() {
       };
     }
 
-    // 2. Densidade de detalhes (olhos, sobrancelhas, óculos, boca) dentro do oval vs. bordas
+    // 2. Densidade de detalhes dentro do oval vs. bordas
     let contrasteCentro = 0;
     let countCentro = 0;
     let contrasteBordaEsq = 0;
@@ -229,10 +228,51 @@ export default function VilaMarketApp() {
     const nitidezEsq = contrasteBordaEsq / Math.max(1, countBordaEsq);
     const nitidezDir = contrasteBordaDir / Math.max(1, countBordaDir);
 
+    // 3. Verificação da região dos olhos (simetria e contraste testa-olhos-bochecha)
+    let brilhoTesta = 0;
+    let countTesta = 0;
+    let brilhoOlhosEsq = 0;
+    let countOlhosEsq = 0;
+    let brilhoOlhosDir = 0;
+    let countOlhosDir = 0;
+    let brilhoBochecha = 0;
+    let countBochecha = 0;
+
+    for (let y = Math.floor(tamanho * 0.28); y < Math.floor(tamanho * 0.65); y++) {
+      for (let x = Math.floor(tamanho * 0.32); x < Math.floor(tamanho * 0.68); x++) {
+        const lum = brilhoMatriz[y * tamanho + x];
+        if (y < tamanho * 0.38) {
+          brilhoTesta += lum;
+          countTesta++;
+        } else if (y < tamanho * 0.49) {
+          if (x < tamanho * 0.48) {
+            brilhoOlhosEsq += lum;
+            countOlhosEsq++;
+          } else if (x > tamanho * 0.52) {
+            brilhoOlhosDir += lum;
+            countOlhosDir++;
+          }
+        } else {
+          brilhoBochecha += lum;
+          countBochecha++;
+        }
+      }
+    }
+
+    const medTesta = brilhoTesta / Math.max(1, countTesta);
+    const medOlhoEsq = brilhoOlhosEsq / Math.max(1, countOlhosEsq);
+    const medOlhoDir = brilhoOlhosDir / Math.max(1, countOlhosDir);
+    const medBochecha = brilhoBochecha / Math.max(1, countBochecha);
+
+    const simetriaOlhos = Math.abs(medOlhoEsq - medOlhoDir) < 22;
+    const contrasteOcular =
+      medTesta - (medOlhoEsq + medOlhoDir) / 2 > 6 ||
+      medBochecha - (medOlhoEsq + medOlhoDir) / 2 > 6;
+    const rostoBiometricoValido = simetriaOlhos && contrasteOcular;
+
     let enquadramentoOk = false;
     let motivoEnquadramento = 'Centralize seu rosto dentro da guia oval.';
 
-    // 3A. Detecção nativa de rosto (Chrome/Android)
     if (typeof window !== 'undefined' && 'FaceDetector' in window) {
       try {
         // @ts-ignore
@@ -268,15 +308,15 @@ export default function VilaMarketApp() {
           }
         }
       } catch {
-        // Fallback geométrico para iOS/Safari sem FaceDetector
         enquadramentoOk =
+          rostoBiometricoValido &&
           nitidezCentro >= 6.8 &&
           nitidezCentro >= nitidezEsq * 0.85 &&
           nitidezCentro >= nitidezDir * 0.85;
       }
     } else {
-      // Fallback geométrico para navegadores sem FaceDetector
       enquadramentoOk =
+        rostoBiometricoValido &&
         nitidezCentro >= 6.8 &&
         nitidezCentro >= nitidezEsq * 0.85 &&
         nitidezCentro >= nitidezDir * 0.85;
