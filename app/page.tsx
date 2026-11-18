@@ -558,7 +558,7 @@ export default function VilaMarketApp() {
       supabase
         .from('perfis')
         .select(
-          'id, condominio_id, unidade_id, complemento_apto, unidade_formatada, nome_completo, cpf, whatsapp, role, selfie_url, status_facial, status_cadastro, saldo_cashback, saldo_pre_pago'
+          'id, condominio_id, unidade_id, complemento_apto, unidade_formatada, nome_completo, cpf, data_nascimento, whatsapp, role, selfie_url, status_facial, status_cadastro, saldo_cashback, saldo_pre_pago'
         )
         .eq('id', usuarioLogado.perfil_id)
         .single(),
@@ -1425,6 +1425,10 @@ export default function VilaMarketApp() {
   const unidadesFiltradas = unidades.filter((u) => u.tipo === tipoUnidade);
   const temSelfie = Boolean(perfilDetalhes?.selfie_url || usuarioLogado?.selfie_url || selfieTemporariaUrl);
   const roleUsuario = perfilDetalhes?.role || usuarioLogado?.role || 'titular';
+  const ehMenorDeIdade =
+    roleUsuario === 'dependente' && perfilDetalhes?.data_nascimento
+      ? calcularIdade(perfilDetalhes.data_nascimento) < 18
+      : false;
 
   // Filtros dos Classificados
   const classificadosFiltrados = classificadosLista.filter((item) => {
@@ -1612,59 +1616,59 @@ export default function VilaMarketApp() {
               </div>
 
               <div className="grid grid-cols-2 gap-2 pt-1">
-  <button
-    type="button"
-    onClick={() => setTipoUnidade('bloco')}
-    className={`py-2.5 rounded-xl text-xs font-bold border transition ${
-      tipoUnidade === 'bloco'
-        ? 'bg-floresta text-white border-floresta shadow-sm'
-        : 'bg-gray-50 text-gray-600 border-gray-200'
-    }`}
-  >
-    Bloco
-  </button>
-  <button
-    type="button"
-    onClick={() => setTipoUnidade('casa')}
-    className={`py-2.5 rounded-xl text-xs font-bold border transition ${
-      tipoUnidade === 'casa'
-        ? 'bg-floresta text-white border-floresta shadow-sm'
-        : 'bg-gray-50 text-gray-600 border-gray-200'
-    }`}
-  >
-    Casa
-  </button>
-</div>
+                <button
+                  type="button"
+                  onClick={() => setTipoUnidade('bloco')}
+                  className={`py-2.5 rounded-xl text-xs font-bold border transition ${
+                    tipoUnidade === 'bloco'
+                      ? 'bg-floresta text-white border-floresta shadow-sm'
+                      : 'bg-gray-50 text-gray-600 border-gray-200'
+                  }`}
+                >
+                  Bloco
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTipoUnidade('casa')}
+                  className={`py-2.5 rounded-xl text-xs font-bold border transition ${
+                    tipoUnidade === 'casa'
+                      ? 'bg-floresta text-white border-floresta shadow-sm'
+                      : 'bg-gray-50 text-gray-600 border-gray-200'
+                  }`}
+                >
+                  Casa
+                </button>
+              </div>
 
-<div className={tipoUnidade === 'bloco' ? 'grid grid-cols-2 gap-2' : 'w-full'}>
-  <div className="flex items-center border border-gray-200 rounded-xl bg-white overflow-hidden focus-within:border-floresta">
-    <span className="pl-3 pr-2.5 py-2.5 text-xs font-bold text-gray-500 bg-gray-50 border-r border-gray-200 select-none">
-      {tipoUnidade === 'bloco' ? 'Bloco' : 'Casa'}
-    </span>
-    <select
-      value={unidadeId}
-      onChange={(e) => setUnidadeId(e.target.value)}
-      className="w-full px-2.5 py-2.5 text-sm font-medium text-grafite bg-white outline-none"
-    >
-      {unidadesFiltradas.map((u) => (
-        <option key={u.id} value={u.id}>
-          {u.identificador}
-        </option>
-      ))}
-    </select>
-  </div>
+              <div className={tipoUnidade === 'bloco' ? 'grid grid-cols-2 gap-2' : 'w-full'}>
+                <div className="flex items-center border border-gray-200 rounded-xl bg-white overflow-hidden focus-within:border-floresta">
+                  <span className="pl-3 pr-2.5 py-2.5 text-xs font-bold text-gray-500 bg-gray-50 border-r border-gray-200 select-none">
+                    {tipoUnidade === 'bloco' ? 'Bloco' : 'Casa'}
+                  </span>
+                  <select
+                    value={unidadeId}
+                    onChange={(e) => setUnidadeId(e.target.value)}
+                    className="w-full px-2.5 py-2.5 text-sm font-medium text-grafite bg-white outline-none"
+                  >
+                    {unidadesFiltradas.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.identificador}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-  {tipoUnidade === 'bloco' && (
-    <input
-      type="text"
-      required
-      placeholder="Nº Apto (ex: 102)"
-      value={complementoApto}
-      onChange={(e) => setComplementoApto(e.target.value)}
-      className="w-full p-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-floresta"
-    />
-  )}
-</div>
+                {tipoUnidade === 'bloco' && (
+                  <input
+                    type="text"
+                    required
+                    placeholder="Nº Apto (ex: 102)"
+                    value={complementoApto}
+                    onChange={(e) => setComplementoApto(e.target.value)}
+                    className="w-full p-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-floresta"
+                  />
+                )}
+              </div>
 
               <div>
                 <label className="block text-xs font-bold text-gray-600 mb-1">
@@ -2032,7 +2036,7 @@ export default function VilaMarketApp() {
               )}
 
               {/* SUB-ABA CLASSIFICADOS DA VILA (ABA PRÓPRIA AO LADO DO MURAL) */}
-              {abaInferior === 'classificados' && (
+              {abaInferior === 'classificados' && !ehMenorDeIdade && (
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <h2 className="text-lg font-bold text-grafite">Classificados da Vila</h2>
@@ -3511,18 +3515,20 @@ export default function VilaMarketApp() {
               <span className="text-[10px] mt-1">Mural</span>
             </button>
 
-            <button
-              type="button"
-              onClick={() => setAbaInferior('classificados')}
-              className={`flex-1 min-h-[48px] px-1 py-1.5 rounded-xl flex flex-col items-center justify-center transition ${
-                abaInferior === 'classificados'
-                  ? 'bg-emerald-50 text-floresta font-bold'
-                  : 'text-gray-500 hover:bg-gray-50'
-              }`}
-            >
-              <span className="text-base leading-none">🏷️</span>
-              <span className="text-[10px] mt-1">Anúncios</span>
-            </button>
+            {!ehMenorDeIdade && (
+              <button
+                type="button"
+                onClick={() => setAbaInferior('classificados')}
+                className={`flex-1 min-h-[48px] px-1 py-1.5 rounded-xl flex flex-col items-center justify-center transition ${
+                  abaInferior === 'classificados'
+                    ? 'bg-emerald-50 text-floresta font-bold'
+                    : 'text-gray-500 hover:bg-gray-50'
+                }`}
+              >
+                <span className="text-base leading-none">🏷️</span>
+                <span className="text-[10px] mt-1">Anúncios</span>
+              </button>
+            )}
 
             <button
               type="button"
