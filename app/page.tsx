@@ -246,7 +246,7 @@ export default function VilaMarketApp() {
     let enquadramentoOk = false;
     let motivoEnquadramento = 'Centralize todo o seu rosto dentro da moldura oval.';
 
-    if (totalPixelsPeleQuadro < tamanho * tamanho * 0.06 || taxaPreenchimentoRosto < 0.36) {
+    if (totalPixelsPeleQuadro < tamanho * tamanho * 0.06 || taxaPreenchimentoRosto < 0.22) {
       enquadramentoOk = false;
       motivoEnquadramento =
         taxaPreenchimentoRosto > 0.12
@@ -261,7 +261,7 @@ export default function VilaMarketApp() {
       if (desvioX > 0.11 || desvioY > 0.14) {
         enquadramentoOk = false;
         motivoEnquadramento = 'Rosto deslocado! Centralize a cabeça dentro da linha pontilhada.';
-      } else if (taxaPreenchimentoRosto > 0.88) {
+      } else if (taxaPreenchimentoRosto > 0.62) {
         enquadramentoOk = false;
         motivoEnquadramento = 'Rosto muito perto da câmera. Afaste um pouco o celular.';
       } else {
@@ -1978,7 +1978,7 @@ export default function VilaMarketApp() {
                     >
                       {qualidadeCamera.mensagem}
                     </p>
-                    <div className="relative w-full h-44 rounded-lg overflow-hidden bg-black">
+                    <div className="relative aspect-square max-w-[230px] mx-auto w-full rounded-xl">
                       <video
                         ref={videoRef}
                         autoPlay
