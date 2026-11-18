@@ -7,6 +7,14 @@ import { supabase } from '@/lib/supabase';
 const TEMPO_SESSAO_MS = 7 * 24 * 60 * 60 * 1000;
 const CHAVE_STORAGE = 'vilamarket_sessao_v1';
 
+interface StatusQualidadeFoto {
+  aprovada: boolean;
+  luzOk: boolean;
+  detalhesOk: boolean;
+  enquadramentoOk: boolean;
+  mensagem: string;
+}
+
 export default function VilaMarketApp() {
   const [aba, setAba] = useState<'login' | 'cadastro' | 'confirmar_wa' | 'esqueci_pin' | 'painel'>('login');
   const [abaInferior, setAbaInferior] = useState<'inicio' | 'mural' | 'perfil' | 'admin'>('inicio');
@@ -42,11 +50,19 @@ export default function VilaMarketApp() {
     null | 'selfie' | 'pin' | 'extrato' | 'novo_dependente' | 'pix_dependente'
   >(null);
 
-  // 1. Estados Modal Selfie (Câmera Frontal + Visualização da Foto Atual)
+  // 1. Estados Modal Selfie + Análise de Qualidade em Tempo Real (Luz, Enquadramento e Detalhes)
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const intervaloAnaliseRef = useRef<NodeJS.Timeout | null>(null);
   const [streamCamera, setStreamCamera] = useState<MediaStream | null>(null);
   const [fotoCapturada, setFotoCapturada] = useState<string | null>(null);
   const [modoTrocaSelfie, setModoTrocaSelfie] = useState(false);
+  const [qualidadeCamera, setQualidadeCamera] = useState<StatusQualidadeFoto>({
+    aprovada: false,
+    luzOk: false,
+    detalhesOk: false,
+    enquadramentoOk: false,
+    mensagem: 'Posicionando câmera...',
+  });
 
   // 2. Estados Modal Alterar PIN
   const [pinAtualTroca, setPinAtualTroca] = useState('');
@@ -78,6 +94,7 @@ export default function VilaMarketApp() {
   useEffect(() => {
     carregarUnidades();
     restaurarSessaoSalva();
+    return () => pararAnaliseCamera();
   }, []);
 
   useEffect(() => {
@@ -87,17 +104,210 @@ export default function VilaMarketApp() {
   }, [aba, usuarioLogado]);
 
   // =========================================================================
+  // MOTOR DE ANÁLISE BIOMÉTRICA (ENQUADRAMENTO, LUMINOSIDADE E DETALHES)
+  // =========================================================================
+  async function analisarFrameDeVideo(video: HTMLVideoElement): Promise<StatusQualidadeFoto> {
+    if (!video || video.videoWidth === 0 || video.videoHeight === 0) {
+      return {
+        aprovada: false,
+        luzOk: false,
+        detalhesOk: false,
+        enquadramentoOk: false,
+        mensagem: 'Iniciando sensor da câmera...',
+      };
+    }
+
+    const tamanho = 240;
+    const canvas = document.createElement('canvas');
+    canvas.width = tamanho;
+    canvas.height = tamanho;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) {
+      return {
+        aprovada: false,
+        luzOk: false,
+        detalhesOk: false,
+        enquadramentoOk: false,
+        mensagem: 'Erro ao processar imagem.',
+      };
+    }
+
+    // Recorta o quadrado central proporcional ao vídeo para análise
+    const menorLado = Math.min(video.videoWidth, video.videoHeight);
+    const sx = (video.videoWidth - menorLado) / 2;
+    const sy = (video.videoHeight - menorLado) / 2;
+    ctx.drawImage(video, sx, sy, menorLado, menorLado, 0, 0, tamanho, tamanho);
+
+    const imgData = ctx.getImageData(0, 0, tamanho, tamanho).data;
+
+    // 1. Análise de Luminosidade e Detalhes/Nitidez na região oval central (onde fica o rosto)
+    let somaBrilho = 0;
+    let somaContrasteBordas = 0;
+    let totalPixelsCentro = 0;
+
+    // Janela central (25% a 75% de largura e 18% a 82% de altura)
+    const xMin = Math.floor(tamanho * 0.25);
+    const xMax = Math.floor(tamanho * 0.75);
+    const yMin = Math.floor(tamanho * 0.18);
+    const yMax = Math.floor(tamanho * 0.82);
+
+    const brilhoMatriz = new Float32Array(tamanho * tamanho);
+
+    for (let y = 0; y < tamanho; y++) {
+      for (let x = 0; x < tamanho; x++) {
+        const idx = (y * tamanho + x) * 4;
+        // Luminância perceptual (Rec. 709)
+        const lum = 0.2126 * imgData[idx] + 0.7152 * imgData[idx + 1] + 0.0722 * imgData[idx + 2];
+        brilhoMatriz[y * tamanho + x] = lum;
+
+        if (x >= xMin && x <= xMax && y >= yMin && y <= yMax) {
+          somaBrilho += lum;
+          totalPixelsCentro++;
+        }
+      }
+    }
+
+    // Calcula nitidez/detalhes faciais (gradiente Laplaciano entre pixels vizinhos no centro)
+    for (let y = yMin + 1; y < yMax - 1; y++) {
+      for (let x = xMin + 1; x < xMax - 1; x++) {
+        const pos = y * tamanho + x;
+        const centro = brilhoMatriz[pos];
+        const laplaciano = Math.abs(
+          4 * centro -
+            brilhoMatriz[pos - 1] -
+            brilhoMatriz[pos + 1] -
+            brilhoMatriz[pos - tamanho] -
+            brilhoMatriz[pos + tamanho]
+        );
+        somaContrasteBordas += laplaciano;
+      }
+    }
+
+    const mediaBrilho = somaBrilho / Math.max(1, totalPixelsCentro);
+    const indiceDetalhes = somaContrasteBordas / Math.max(1, totalPixelsCentro);
+
+    // 2. Verificação de Enquadramento Facial (FaceDetector nativo se suportado + proporção)
+    let enquadramentoOk = true;
+    let motivoEnquadramento = '';
+
+    if (typeof window !== 'undefined' && 'FaceDetector' in window) {
+      try {
+        // @ts-ignore - API nativa do Chrome/Android
+        const detector = new window.FaceDetector({ fastMode: true, maxDetectedFaces: 2 });
+        const rostos = await detector.detect(canvas);
+
+        if (!rostos || rostos.length === 0) {
+          enquadramentoOk = false;
+          motivoEnquadramento = 'Nenhum rosto detectado. Centralize seu rosto na moldura oval.';
+        } else if (rostos.length > 1) {
+          enquadramentoOk = false;
+          motivoEnquadramento = 'Mais de um rosto na tela. Tire a foto sozinho(a).';
+        } else {
+          const box = rostos[0].boundingBox;
+          const centroX = box.x + box.width / 2;
+          const centroY = box.y + box.height / 2;
+          const proporcaoLargura = box.width / tamanho;
+
+          if (proporcaoLargura < 0.26) {
+            enquadramentoOk = false;
+            motivoEnquadramento = 'Rosto muito longe. Aproxime o celular do rosto.';
+          } else if (proporcaoLargura > 0.78) {
+            enquadramentoOk = false;
+            motivoEnquadramento = 'Rosto muito perto. Afaste um pouco o celular.';
+          } else if (
+            Math.abs(centroX - tamanho / 2) > tamanho * 0.18 ||
+            Math.abs(centroY - tamanho / 2) > tamanho * 0.2
+          ) {
+            enquadramentoOk = false;
+            motivoEnquadramento = 'Centralize o rosto dentro da guia oval.';
+          }
+        }
+      } catch {
+        // Se o aparelho não suportar FaceDetector por hardware, segue com análise de luz e detalhes
+        enquadramentoOk = true;
+      }
+    }
+
+    // 3. Regras de Aprovação (Luz + Detalhes mínimos para rejeitar paredes, lente tampada ou fotos borradas)
+    const luzOk = mediaBrilho >= 58 && mediaBrilho <= 235;
+    const detalhesOk = indiceDetalhes >= 6.5;
+
+    if (!enquadramentoOk) {
+      return {
+        aprovada: false,
+        luzOk,
+        detalhesOk,
+        enquadramentoOk: false,
+        mensagem: motivoEnquadramento,
+      };
+    }
+
+    if (mediaBrilho < 58) {
+      return {
+        aprovada: false,
+        luzOk: false,
+        detalhesOk,
+        enquadramentoOk: true,
+        mensagem: 'Pouca luz! Vá para um ambiente mais iluminado ou vire-se para a luz.',
+      };
+    }
+
+    if (mediaBrilho > 235) {
+      return {
+        aprovada: false,
+        luzOk: false,
+        detalhesOk,
+        enquadramentoOk: true,
+        mensagem: 'Excesso de luz (contra o sol/lâmpada). Evite luz forte atrás de você.',
+      };
+    }
+
+    if (!detalhesOk) {
+      return {
+        aprovada: false,
+        luzOk: true,
+        detalhesOk: false,
+        enquadramentoOk: true,
+        mensagem: 'Imagem sem detalhes nítidos (parede ou borrada). Enquadre seu rosto com firmeza.',
+      };
+    }
+
+    return {
+      aprovada: true,
+      luzOk: true,
+      detalhesOk: true,
+      enquadramentoOk: true,
+      mensagem: '✅ Rosto enquadrado e iluminação ótima! Pode capturar.',
+    };
+  }
+
+  function iniciarMonitoramentoQualidade() {
+    pararAnaliseCamera();
+    intervaloAnaliseRef.current = setInterval(async () => {
+      if (videoRef.current) {
+        const status = await analisarFrameDeVideo(videoRef.current);
+        setQualidadeCamera(status);
+      }
+    }, 450);
+  }
+
+  function pararAnaliseCamera() {
+    if (intervaloAnaliseRef.current) {
+      clearInterval(intervaloAnaliseRef.current);
+      intervaloAnaliseRef.current = null;
+    }
+  }
+
+  // =========================================================================
   // FUNÇÕES DE STORAGE PRIVADO E SESSÃO (CONFORMIDADE LGPD)
   // =========================================================================
   async function gerarUrlTemporariaSelfie(caminhoOuBase64: string | null): Promise<string | null> {
     if (!caminhoOuBase64) return null;
 
-    // Compatibilidade caso exista foto antiga em Base64 antes da migração
     if (caminhoOuBase64.startsWith('data:image')) {
       return caminhoOuBase64;
     }
 
-    // Gera URL assinada temporária válida por 10 minutos (600s) do bucket privado 'selfies'
     const { data, error } = await supabase.storage
       .from('selfies')
       .createSignedUrl(caminhoOuBase64, 600);
@@ -191,7 +401,6 @@ export default function VilaMarketApp() {
     if (perfil) {
       setPerfilDetalhes(perfil);
 
-      // Carrega a URL assinada temporária da selfie se existir
       if (perfil.selfie_url) {
         const urlSegura = await gerarUrlTemporariaSelfie(perfil.selfie_url);
         setSelfieTemporariaUrl(urlSegura);
@@ -381,18 +590,29 @@ export default function VilaMarketApp() {
   }
 
   // =========================================================================
-  // FUNÇÕES DA DASHBOARD (SELFIE PRIVADA, ALTERAR PIN, EXTRATO, DEPENDENTES)
+  // FUNÇÕES DA DASHBOARD (SELFIE COM VALIDAÇÃO DE QUALIDADE, PIN, EXTRATO)
   // =========================================================================
   async function iniciarCameraSelfie() {
     setFotoCapturada(null);
     setModoTrocaSelfie(true);
+    setQualidadeCamera({
+      aprovada: false,
+      luzOk: false,
+      detalhesOk: false,
+      enquadramentoOk: false,
+      mensagem: 'Iniciando câmera e analisando luz...',
+    });
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'user', width: 480, height: 480 },
       });
       setStreamCamera(stream);
       setTimeout(() => {
-        if (videoRef.current) videoRef.current.srcObject = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          iniciarMonitoramentoQualidade();
+        }
       }, 150);
     } catch {
       alert('Permita o acesso à câmera frontal do navegador para tirar a sua selfie.');
@@ -415,21 +635,37 @@ export default function VilaMarketApp() {
   }
 
   function fecharCamera() {
+    pararAnaliseCamera();
     if (streamCamera) {
       streamCamera.getTracks().forEach((track) => track.stop());
       setStreamCamera(null);
     }
   }
 
-  function capturarFrameSelfie(paraDependente = false) {
+  async function capturarFrameSelfie(paraDependente = false) {
     if (!videoRef.current) return;
+
+    // Faz uma última checagem rigorosa exatamente no milissegundo do clique
+    const checagemFinal = await analisarFrameDeVideo(videoRef.current);
+    setQualidadeCamera(checagemFinal);
+
+    if (!checagemFinal.aprovada) {
+      alert(`Foto não aceita: ${checagemFinal.mensagem}`);
+      return;
+    }
+
     const canvas = document.createElement('canvas');
     canvas.width = 400;
     canvas.height = 400;
     const ctx = canvas.getContext('2d');
     if (ctx) {
-      ctx.drawImage(videoRef.current, 0, 0, 400, 400);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      // Recorta quadrado central proporcional sem esticar o rosto
+      const menorLado = Math.min(videoRef.current.videoWidth, videoRef.current.videoHeight);
+      const sx = (videoRef.current.videoWidth - menorLado) / 2;
+      const sy = (videoRef.current.videoHeight - menorLado) / 2;
+      ctx.drawImage(videoRef.current, sx, sy, menorLado, menorLado, 0, 0, 400, 400);
+
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
       if (paraDependente) {
         setDepSelfieBase64(dataUrl);
       } else {
@@ -444,13 +680,11 @@ export default function VilaMarketApp() {
     setCarregando(true);
 
     try {
-      // 1. Envia o arquivo JPEG para o Bucket Privado 'selfies' (protegido por RLS)
       const caminhoPrivado = await enviarSelfieParaStoragePrivado(
         fotoCapturada,
         usuarioLogado.perfil_id
       );
 
-      // 2. Salva APENAS o caminho do arquivo na tabela 'perfis' (sem Base64 exposto)
       const { error } = await supabase
         .from('perfis')
         .update({
@@ -464,7 +698,7 @@ export default function VilaMarketApp() {
       await carregarDadosDashboard();
       setModoTrocaSelfie(false);
       setModalAtivo(null);
-      alert('Selfie salva com criptografia LGPD e sincronizada com o leitor facial da porta!');
+      alert('Selfie validada e salva com criptografia LGPD para o leitor facial da porta!');
     } catch (err: any) {
       alert('Erro ao salvar selfie: ' + (err.message || 'Tente novamente.'));
     } finally {
@@ -527,7 +761,7 @@ export default function VilaMarketApp() {
       return;
     }
     if (!depSelfieBase64) {
-      alert('Tire a selfie do dependente para liberar o acesso facial na porta.');
+      alert('Tire a selfie do dependente com boa iluminação para liberar o acesso facial na porta.');
       return;
     }
     if (!aceiteLgpdDependente) {
@@ -556,7 +790,6 @@ export default function VilaMarketApp() {
         throw new Error(authErr?.message || 'CPF já cadastrado');
       }
 
-      // Envia a selfie do dependente para o bucket privado 'selfies'
       const caminhoSelfieDep = await enviarSelfieParaStoragePrivado(
         depSelfieBase64,
         authData.user.id
@@ -623,7 +856,6 @@ export default function VilaMarketApp() {
 
     setCarregando(true);
 
-    // 1. Valida o PIN do titular antes de movimentar saldo (Segurança de Sessão Persistente)
     const cpfTitularLimpo = (perfilDetalhes?.cpf || cpf || '').replace(/\D/g, '');
     const { data: checkPin, error: errPin } = await supabase.rpc('validar_cpf_pin', {
       p_cpf: cpfTitularLimpo,
@@ -636,7 +868,6 @@ export default function VilaMarketApp() {
       return;
     }
 
-    // 2. Executa a recarga protegida
     const { data, error } = await supabase.rpc('adicionar_saldo_pix', {
       p_perfil_id: dependenteSelecionado.id,
       p_valor: parseFloat(valorPix),
@@ -662,12 +893,10 @@ export default function VilaMarketApp() {
 
     setCarregando(true);
     try {
-      // Remove o arquivo do bucket privado se existir
       if (perfilDetalhes?.selfie_url && !perfilDetalhes.selfie_url.startsWith('data:image')) {
         await supabase.storage.from('selfies').remove([perfilDetalhes.selfie_url]);
       }
 
-      // Desativa o acesso facial e limpa a referência da selfie no banco
       await supabase
         .from('perfis')
         .update({
@@ -1340,7 +1569,7 @@ export default function VilaMarketApp() {
       </div>
 
       {/* ===================================================================== */}
-      {/* MODAL 1: MINHA SELFIE (VISUALIZAR FOTO ENVIADA OU MUDAR)              */}
+      {/* MODAL 1: MINHA SELFIE COM GUIA OVAL E ANÁLISE DE LUZ / ENQUADRAMENTO  */}
       {/* ===================================================================== */}
       {modalAtivo === 'selfie' && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
@@ -1381,22 +1610,78 @@ export default function VilaMarketApp() {
               </div>
             ) : !fotoCapturada ? (
               <div className="space-y-3">
-                <p className="text-xs text-gray-500">
-                  Centralize seu rosto na câmera frontal em local bem iluminado.
-                </p>
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="w-full h-64 object-cover rounded-xl bg-black"
-                />
+                {/* Barra de Diagnóstico em Tempo Real */}
+                <div
+                  className={`p-2.5 rounded-xl text-xs font-semibold text-center border transition-colors ${
+                    qualidadeCamera.aprovada
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                      : 'bg-amber-50 text-amber-800 border-amber-300'
+                  }`}
+                >
+                  {qualidadeCamera.mensagem}
+                </div>
+
+                {/* Container da Câmera com Guia Oval de Enquadramento */}
+                <div className="relative w-full h-64 rounded-xl overflow-hidden bg-black">
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-full h-full object-cover scale-x-[-1]"
+                  />
+                  {/* Máscara Oval de Guia Facial */}
+                  <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                    <div
+                      className={`w-40 h-52 rounded-full border-4 border-dashed transition-colors ${
+                        qualidadeCamera.aprovada ? 'border-emerald-400' : 'border-amber-400/80'
+                      }`}
+                    />
+                  </div>
+                </div>
+
+                {/* Indicadores Rápidos */}
+                <div className="grid grid-cols-3 gap-1.5 text-[10px] text-center font-bold">
+                  <span
+                    className={`py-1 rounded-lg ${
+                      qualidadeCamera.enquadramentoOk
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : 'bg-gray-100 text-gray-500'
+                    }`}
+                  >
+                    {qualidadeCamera.enquadramentoOk ? '✓ Enquadrado' : '○ Enquadrar'}
+                  </span>
+                  <span
+                    className={`py-1 rounded-lg ${
+                      qualidadeCamera.luzOk
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : 'bg-gray-100 text-gray-500'
+                    }`}
+                  >
+                    {qualidadeCamera.luzOk ? '✓ Boa Luz' : '○ Iluminação'}
+                  </span>
+                  <span
+                    className={`py-1 rounded-lg ${
+                      qualidadeCamera.detalhesOk
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : 'bg-gray-100 text-gray-500'
+                    }`}
+                  >
+                    {qualidadeCamera.detalhesOk ? '✓ Nitidez OK' : '○ Nitidez'}
+                  </span>
+                </div>
+
                 <button
                   type="button"
                   onClick={() => capturarFrameSelfie(false)}
-                  className="w-full bg-floresta text-white font-bold py-3 rounded-xl text-xs"
+                  disabled={!qualidadeCamera.aprovada}
+                  className={`w-full font-bold py-3 rounded-xl text-xs transition ${
+                    qualidadeCamera.aprovada
+                      ? 'bg-floresta hover:bg-floresta-claro text-white'
+                      : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  }`}
                 >
-                  Capturar Foto
+                  {qualidadeCamera.aprovada ? '📸 Capturar Foto Agora' : 'Ajuste o rosto/luz para liberar'}
                 </button>
               </div>
             ) : (
@@ -1404,7 +1689,7 @@ export default function VilaMarketApp() {
                 <img
                   src={fotoCapturada}
                   alt="Nova selfie"
-                  className="w-full h-64 object-cover rounded-xl border"
+                  className="w-full h-64 object-cover rounded-xl border scale-x-[-1]"
                 />
                 <div className="grid grid-cols-2 gap-2">
                   <button
@@ -1540,7 +1825,7 @@ export default function VilaMarketApp() {
         </div>
       )}
 
-      {/* MODAL 4: ADICIONAR DEPENDENTE (MÍNIMO 12 ANOS, CPF, PIN, SELFIE PRIVADA E CONSENTIMENTO LGPD ART. 14) */}
+      {/* MODAL 4: ADICIONAR DEPENDENTE (COM MESMA VALIDAÇÃO DE QUALIDADE DE SELFIE) */}
       {modalAtivo === 'novo_dependente' && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
           <form
@@ -1590,19 +1875,42 @@ export default function VilaMarketApp() {
               {!depSelfieBase64 ? (
                 streamCamera ? (
                   <div className="space-y-2">
-                    <video
-                      ref={videoRef}
-                      autoPlay
-                      playsInline
-                      muted
-                      className="w-full h-40 object-cover rounded-lg bg-black"
-                    />
+                    <p
+                      className={`text-[11px] font-semibold p-1.5 rounded-lg ${
+                        qualidadeCamera.aprovada
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-amber-100 text-amber-800'
+                      }`}
+                    >
+                      {qualidadeCamera.mensagem}
+                    </p>
+                    <div className="relative w-full h-44 rounded-lg overflow-hidden bg-black">
+                      <video
+                        ref={videoRef}
+                        autoPlay
+                        playsInline
+                        muted
+                        className="w-full h-full object-cover scale-x-[-1]"
+                      />
+                      <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                        <div
+                          className={`w-28 h-36 rounded-full border-2 border-dashed ${
+                            qualidadeCamera.aprovada ? 'border-emerald-400' : 'border-amber-400'
+                          }`}
+                        />
+                      </div>
+                    </div>
                     <button
                       type="button"
                       onClick={() => capturarFrameSelfie(true)}
-                      className="bg-floresta text-white text-xs font-bold px-4 py-2 rounded-lg"
+                      disabled={!qualidadeCamera.aprovada}
+                      className={`text-xs font-bold px-4 py-2 rounded-lg w-full ${
+                        qualidadeCamera.aprovada
+                          ? 'bg-floresta text-white'
+                          : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                      }`}
                     >
-                      Capturar Foto
+                      {qualidadeCamera.aprovada ? '📸 Capturar Foto' : 'Ajuste rosto e luz'}
                     </button>
                   </div>
                 ) : (
@@ -1610,11 +1918,14 @@ export default function VilaMarketApp() {
                     type="button"
                     onClick={async () => {
                       const s = await navigator.mediaDevices.getUserMedia({
-                        video: { facingMode: 'user' },
+                        video: { facingMode: 'user', width: 480, height: 480 },
                       });
                       setStreamCamera(s);
                       setTimeout(() => {
-                        if (videoRef.current) videoRef.current.srcObject = s;
+                        if (videoRef.current) {
+                          videoRef.current.srcObject = s;
+                          iniciarMonitoramentoQualidade();
+                        }
                       }, 150);
                     }}
                     className="text-xs font-bold text-floresta underline"
@@ -1627,7 +1938,7 @@ export default function VilaMarketApp() {
                   <img
                     src={depSelfieBase64}
                     alt="Selfie Dependente"
-                    className="w-20 h-20 rounded-full mx-auto object-cover border"
+                    className="w-20 h-20 rounded-full mx-auto object-cover border scale-x-[-1]"
                   />
                   <button
                     type="button"
