@@ -1612,54 +1612,59 @@ export default function VilaMarketApp() {
               </div>
 
               <div className="grid grid-cols-2 gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setTipoUnidade('bloco')}
-                  className={`py-2 rounded-lg text-xs font-bold border ${
-                    tipoUnidade === 'bloco'
-                      ? 'bg-floresta text-white border-floresta'
-                      : 'bg-gray-50 text-gray-600'
-                  }`}
-                >
-                  Bloco (01 a 40)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTipoUnidade('casa')}
-                  className={`py-2 rounded-lg text-xs font-bold border ${
-                    tipoUnidade === 'casa'
-                      ? 'bg-floresta text-white border-floresta'
-                      : 'bg-gray-50 text-gray-600'
-                  }`}
-                >
-                  Casa (2150 a 2200)
-                </button>
-              </div>
+  <button
+    type="button"
+    onClick={() => setTipoUnidade('bloco')}
+    className={`py-2.5 rounded-xl text-xs font-bold border transition ${
+      tipoUnidade === 'bloco'
+        ? 'bg-floresta text-white border-floresta shadow-sm'
+        : 'bg-gray-50 text-gray-600 border-gray-200'
+    }`}
+  >
+    Bloco
+  </button>
+  <button
+    type="button"
+    onClick={() => setTipoUnidade('casa')}
+    className={`py-2.5 rounded-xl text-xs font-bold border transition ${
+      tipoUnidade === 'casa'
+        ? 'bg-floresta text-white border-floresta shadow-sm'
+        : 'bg-gray-50 text-gray-600 border-gray-200'
+    }`}
+  >
+    Casa
+  </button>
+</div>
 
-              <div className="grid grid-cols-2 gap-2">
-                <select
-                  value={unidadeId}
-                  onChange={(e) => setUnidadeId(e.target.value)}
-                  className="w-full p-2.5 border rounded-xl text-sm bg-white"
-                >
-                  {unidadesFiltradas.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {tipoUnidade === 'bloco' ? `Bloco ${u.identificador}` : `Casa ${u.identificador}`}
-                    </option>
-                  ))}
-                </select>
+<div className={tipoUnidade === 'bloco' ? 'grid grid-cols-2 gap-2' : 'w-full'}>
+  <div className="flex items-center border border-gray-200 rounded-xl bg-white overflow-hidden focus-within:border-floresta">
+    <span className="pl-3 pr-2.5 py-2.5 text-xs font-bold text-gray-500 bg-gray-50 border-r border-gray-200 select-none">
+      {tipoUnidade === 'bloco' ? 'Bloco' : 'Casa'}
+    </span>
+    <select
+      value={unidadeId}
+      onChange={(e) => setUnidadeId(e.target.value)}
+      className="w-full px-2.5 py-2.5 text-sm font-medium text-grafite bg-white outline-none"
+    >
+      {unidadesFiltradas.map((u) => (
+        <option key={u.id} value={u.id}>
+          {u.identificador}
+        </option>
+      ))}
+    </select>
+  </div>
 
-                {tipoUnidade === 'bloco' && (
-                  <input
-                    type="text"
-                    required
-                    placeholder="Nº Apto (ex: 102)"
-                    value={complementoApto}
-                    onChange={(e) => setComplementoApto(e.target.value)}
-                    className="w-full p-2.5 border rounded-xl text-sm"
-                  />
-                )}
-              </div>
+  {tipoUnidade === 'bloco' && (
+    <input
+      type="text"
+      required
+      placeholder="Nº Apto (ex: 102)"
+      value={complementoApto}
+      onChange={(e) => setComplementoApto(e.target.value)}
+      className="w-full p-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-floresta"
+    />
+  )}
+</div>
 
               <div>
                 <label className="block text-xs font-bold text-gray-600 mb-1">
