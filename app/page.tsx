@@ -188,13 +188,12 @@ export default function VilaMarketApp() {
     return () => pararAnaliseCamera();
   }, []);
 
-useEffect(() => {
+  useEffect(() => {
     if (aba === 'cadastro' && unidades.length === 0) {
       carregarUnidades();
     }
-
     if (aba === 'painel' && usuarioLogado?.perfil_id) {
-      // Limpa dados residuais de sessões anteriores antes de carregar o novo perfil
+      // Limpeza imediata de vestígios da conta anterior para evitar conflito de foto e perfil/admin
       setPerfilDetalhes(null);
       setSelfieTemporariaUrl(null);
       setDependentesLista([]);
@@ -567,10 +566,8 @@ useEffect(() => {
     const idAlvo = usuarioLogado?.perfil_id;
     if (!idAlvo) return;
 
-    // 1. Se já veio o caminho da selfie no login, busca imediatamente
     if (usuarioLogado?.selfie_url) {
       gerarUrlTemporariaSelfie(usuarioLogado.selfie_url).then((url) => {
-        // Só aplica se o usuário logado ainda for o mesmo!
         if (url && usuarioLogado?.perfil_id === idAlvo) {
           setSelfieTemporariaUrl(url);
         }
@@ -579,7 +576,6 @@ useEffect(() => {
       setSelfieTemporariaUrl(null);
     }
 
-    // 2. Busca os dados atualizados direto do banco
     const [resPerfil, resDeps] = await Promise.all([
       supabase
         .from('perfis')
@@ -595,7 +591,6 @@ useEffect(() => {
         .order('criado_em', { ascending: true }),
     ]);
 
-    // Garante que não houve troca de conta durante a consulta ao banco
     if (usuarioLogado?.perfil_id !== idAlvo) return;
 
     const perfil = resPerfil.data;
@@ -912,7 +907,7 @@ useEffect(() => {
   }
 
   // =========================================================================
-  // LOGIN, CADASTRO E WHATSAPP (ENVIA APENAS OS 11 NÚMEROS LIMPOS AO BANCO)
+  // LOGIN, CADASTRO E WHATSAPP
   // =========================================================================
   async function fazerLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -937,6 +932,12 @@ useEffect(() => {
     }
 
     if (data?.sucesso) {
+      // Zera completamente estados anteriores ao logar em uma nova conta
+      setSelfieTemporariaUrl(null);
+      setPerfilDetalhes(null);
+      setDependentesLista([]);
+      setDependentesSelfiesMap({});
+      
       setUsuarioLogado(data);
       salvarSessaoNoNavegador(data);
       setAba('painel');
@@ -1055,6 +1056,8 @@ useEffect(() => {
       return;
     }
 
+    setSelfieTemporariaUrl(null);
+    setPerfilDetalhes(null);
     setUsuarioLogado(loginData);
     salvarSessaoNoNavegador(loginData);
     setMensagem(null);
@@ -1469,7 +1472,10 @@ useEffect(() => {
 
       alert('Seus dados biométricos foram removidos e seu acesso foi encerrado conforme a LGPD.');
       limparSessaoDoNavegador();
+      try { sessionStorage.clear(); } catch {}
       setUsuarioLogado(null);
+      setPerfilDetalhes(null);
+      setSelfieTemporariaUrl(null);
       setPin('');
       setAba('login');
     } catch {
@@ -1916,13 +1922,13 @@ useEffect(() => {
                         className="shrink-0 group focus:outline-none"
                       >
                         {selfieTemporariaUrl ? (
-  <img
-    key={usuarioLogado.perfil_id}
-    src={selfieTemporariaUrl}
-    alt="Sua selfie"
-    className="w-16 h-16 rounded-full object-cover border-2 border-emerald-600 shadow-md group-hover:scale-105 transition"
-  />
-) : (
+                          <img
+                            key={usuarioLogado.perfil_id}
+                            src={selfieTemporariaUrl}
+                            alt="Sua selfie"
+                            className="w-16 h-16 rounded-full object-cover border-2 border-emerald-600 shadow-md group-hover:scale-105 transition"
+                          />
+                        ) : (
                           <div className="w-16 h-16 rounded-full bg-emerald-100 border-2 border-emerald-600 flex items-center justify-center">
                             <span className="w-5 h-5 border-2 border-emerald-700 border-t-transparent rounded-full animate-spin" />
                           </div>
@@ -2341,13 +2347,13 @@ useEffect(() => {
                       title="Toque na foto para ampliar ou atualizar"
                     >
                       {temSelfie && selfieTemporariaUrl ? (
-  <img
-    key={usuarioLogado.perfil_id}
-    src={selfieTemporariaUrl}
-    alt="Selfie do perfil"
-    className="w-16 h-16 rounded-full object-cover border-2 border-floresta shadow-sm group-hover:opacity-90 transition"
-  />
-) : (
+                        <img
+                          key={usuarioLogado.perfil_id}
+                          src={selfieTemporariaUrl}
+                          alt="Selfie do perfil"
+                          className="w-16 h-16 rounded-full object-cover border-2 border-floresta shadow-sm group-hover:opacity-90 transition"
+                        />
+                      ) : (
                         <div className="w-16 h-16 rounded-full bg-amber-100 border-2 border-amber-400 flex items-center justify-center text-2xl">
                           📷
                         </div>
@@ -2431,35 +2437,33 @@ useEffect(() => {
                   <button
                     type="button"
                     onClick={() => {
-  limparSessaoDoNavegador();
-  try { sessionStorage.clear(); } catch {}
-  setUsuarioLogado(null);
-  setPerfilDetalhes(null);
-  setSelfieTemporariaUrl(null);
-  setDependentesLista([]);
-  setDependentesSelfiesMap({});
-  setPin('');
-  setAba('login');
-}}
+                      limparSessaoDoNavegador();
+                      try { sessionStorage.clear(); } catch {}
+                      setUsuarioLogado(null);
+                      setPerfilDetalhes(null);
+                      setSelfieTemporariaUrl(null);
+                      setDependentesLista([]);
+                      setDependentesSelfiesMap({});
+                      setPin('');
+                      setAba('login');
+                    }}
                     className="w-full py-3 text-xs font-bold text-gray-700 border border-gray-300 rounded-xl hover:bg-gray-50"
                   >
                     Sair da Conta
-                  <button
-  type="button"
-  onClick={() => {
-    limparSessaoDoNavegador();
-    setUsuarioLogado(null);
-    setPerfilDetalhes(null);
-    setSelfieTemporariaUrl(null);
-    setDependentesLista([]);
-    setDependentesSelfiesMap({});
-    setPin('');
-    setAba('login');
-  }}
-  className="w-full py-3 text-xs font-bold text-gray-700 border border-gray-300 rounded-xl hover:bg-gray-50"
->
-  Sair da Conta
-</button>
+                  </button>
+
+                  <div className="pt-2 border-t border-gray-200 text-center space-y-2">
+                    <p className="text-[11px] text-gray-400">
+                      Dados protegidos em banco privado do VilaMarket conforme a LGPD.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={solicitarExclusaoDadosLgpd}
+                      disabled={carregando}
+                      className="text-[11px] text-red-600 font-semibold hover:underline"
+                    >
+                      Excluir minha selfie e encerrar cadastro (Direito LGPD)
+                    </button>
                   </div>
                 </div>
               )}
@@ -3084,17 +3088,17 @@ useEffect(() => {
                   porta:
                 </p>
                 {selfieTemporariaUrl ? (
-  <img
-    key={usuarioLogado.perfil_id}
-    src={selfieTemporariaUrl}
-    alt="Selfie ampliada"
-    className="w-64 h-64 mx-auto object-cover rounded-2xl border-2 border-emerald-600 shadow-md"
-  />
-) : (
-  <div className="w-64 h-64 mx-auto flex items-center justify-center bg-gray-100 rounded-2xl text-xs text-gray-500">
-    Carregando imagem segura...
-  </div>
-)}
+                  <img
+                    key={usuarioLogado.perfil_id}
+                    src={selfieTemporariaUrl}
+                    alt="Selfie ampliada"
+                    className="w-64 h-64 mx-auto object-cover rounded-2xl border-2 border-emerald-600 shadow-md"
+                  />
+                ) : (
+                  <div className="w-64 h-64 mx-auto flex items-center justify-center bg-gray-100 rounded-2xl text-xs text-gray-500">
+                    Carregando imagem segura...
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={iniciarCameraSelfie}
