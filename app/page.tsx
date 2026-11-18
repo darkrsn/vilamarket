@@ -64,7 +64,9 @@ function converterMoedaParaNumero(valorFormatado: string): number {
 
 export default function VilaMarketApp() {
   const [aba, setAba] = useState<'login' | 'cadastro' | 'confirmar_wa' | 'esqueci_pin' | 'painel'>('login');
-  const [abaInferior, setAbaInferior] = useState<'inicio' | 'mural' | 'ajuda' | 'perfil' | 'admin'>('inicio');
+  const [abaInferior, setAbaInferior] = useState<
+    'inicio' | 'mural' | 'classificados' | 'ajuda' | 'perfil' | 'admin'
+  >('inicio');
   const [unidades, setUnidades] = useState<any[]>([]);
   const [condominioId, setCondominioId] = useState<string>('');
   const [mensagem, setMensagem] = useState<{ tipo: 'erro' | 'sucesso'; texto: string } | null>(null);
@@ -136,7 +138,6 @@ export default function VilaMarketApp() {
   const [pinConfirmacaoPix, setPinConfirmacaoPix] = useState('');
 
   // 6. Estados Mural & Classificados
-  const [subAbaMural, setSubAbaMural] = useState<'avisos' | 'classificados'>('avisos');
   const [avisosLista, setAvisosLista] = useState<any[]>([]);
   const [classificadosLista, setClassificadosLista] = useState<any[]>([]);
   const [filtroCategoria, setFiltroCategoria] = useState('Todos');
@@ -585,7 +586,6 @@ export default function VilaMarketApp() {
         const deps = resDeps.data || [];
         setDependentesLista(deps);
 
-        // Carrega miniaturas dos dependentes
         const mapaFotos: Record<string, string> = {};
         await Promise.all(
           deps.map(async (d: any) => {
@@ -1260,7 +1260,6 @@ export default function VilaMarketApp() {
 
     setCarregando(true);
     try {
-      // Garante UUIDs válidos (nunca string vazia "")
       let cId: string | null = perfilDetalhes?.condominio_id || condominioId || null;
       if (!cId) {
         const { data: conds } = await supabase.from('condominios').select('id').limit(1);
@@ -1278,7 +1277,6 @@ export default function VilaMarketApp() {
       const emailTecnicoDep = `user_${cpfDepLimpo}@vilamarket.com.br`;
       const senhaAuthDep = `VM#${depPin}#${cpfDepLimpo.slice(-4)}`;
 
-      // Guarda a sessão atual do titular antes do signUp para restaurar depois
       const { data: sessaoTitularAtual } = await supabase.auth.getSession();
 
       const { data: authData, error: authErr } = await supabase.auth.signUp({
@@ -1318,7 +1316,6 @@ export default function VilaMarketApp() {
         p_pin_aberto: depPin,
       });
 
-      // Restaura a sessão do titular caso o signUp tenha trocado a sessão ativa
       if (sessaoTitularAtual?.session) {
         await supabase.auth.setSession({
           access_token: sessaoTitularAtual.session.access_token,
@@ -1967,262 +1964,247 @@ export default function VilaMarketApp() {
                 </>
               )}
 
-              {/* SUB-ABA MURAL (FEED) & CLASSIFICADOS DA VILA */}
+              {/* SUB-ABA MURAL DE AVISOS (FEED DINÂMICO) */}
               {abaInferior === 'mural' && (
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
-                    <h2 className="text-lg font-bold text-grafite">Mural & Classificados</h2>
-                    {subAbaMural === 'classificados' && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAnuncioWhatsapp(perfilDetalhes?.whatsapp || '');
-                          setModalAtivo('novo_anuncio');
-                        }}
-                        className="bg-floresta hover:bg-floresta-claro text-white text-xs font-bold px-3 py-2 rounded-xl transition"
-                      >
-                        + Criar Anúncio
-                      </button>
+                    <h2 className="text-lg font-bold text-grafite">Mural de Avisos</h2>
+                    <span className="text-[11px] font-bold bg-emerald-50 text-floresta px-2.5 py-1 rounded-full">
+                      {avisosLista.length} {avisosLista.length === 1 ? 'aviso' : 'avisos'}
+                    </span>
+                  </div>
+
+                  <div className="space-y-4">
+                    {avisosLista.length === 0 ? (
+                      <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl text-xs text-emerald-950 space-y-1">
+                        <p className="font-bold text-sm">🎉 Bem-vindo ao VilaMarket!</p>
+                        <p>
+                          Compre no minimercado autônomo da Vila usando Pix e ganhe 2% de cashback
+                          automático na sua carteira.
+                        </p>
+                      </div>
+                    ) : (
+                      avisosLista.map((aviso) => (
+                        <article
+                          key={aviso.id}
+                          className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm"
+                        >
+                          <div className="p-3.5 border-b border-gray-100 flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="w-7 h-7 rounded-full bg-floresta text-white flex items-center justify-center text-xs font-bold">
+                                VM
+                              </span>
+                              <div>
+                                <p className="text-xs font-bold text-grafite">Administração VilaMarket</p>
+                                <p className="text-[10px] text-gray-400">
+                                  {new Date(aviso.criado_em).toLocaleDateString('pt-BR')}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {aviso.imagem_url && (
+                            <div className="w-full bg-gray-100">
+                              <img
+                                src={aviso.imagem_url}
+                                alt={aviso.titulo}
+                                className="w-full h-auto max-h-[480px] object-contain mx-auto block"
+                              />
+                            </div>
+                          )}
+
+                          <div className="p-4 space-y-1.5">
+                            <h3 className="font-bold text-sm text-grafite">{aviso.titulo}</h3>
+                            <p className="text-xs text-gray-700 whitespace-pre-line leading-relaxed">
+                              {aviso.conteudo}
+                            </p>
+                          </div>
+                        </article>
+                      ))
                     )}
                   </div>
+                </div>
+              )}
 
-                  <div className="grid grid-cols-2 gap-2 bg-gray-100 p-1 rounded-xl">
+              {/* SUB-ABA CLASSIFICADOS DA VILA (ABA PRÓPRIA AO LADO DO MURAL) */}
+              {abaInferior === 'classificados' && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-lg font-bold text-grafite">Classificados da Vila</h2>
                     <button
                       type="button"
-                      onClick={() => setSubAbaMural('avisos')}
-                      className={`py-2 text-xs font-bold rounded-lg transition ${
-                        subAbaMural === 'avisos' ? 'bg-floresta text-white' : 'text-gray-600'
-                      }`}
+                      onClick={() => {
+                        setAnuncioWhatsapp(perfilDetalhes?.whatsapp || '');
+                        setModalAtivo('novo_anuncio');
+                      }}
+                      className="bg-floresta hover:bg-floresta-claro text-white text-xs font-bold px-3 py-2 rounded-xl transition"
                     >
-                      Avisos Oficiais ({avisosLista.length})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSubAbaMural('classificados')}
-                      className={`py-2 text-xs font-bold rounded-lg transition ${
-                        subAbaMural === 'classificados' ? 'bg-floresta text-white' : 'text-gray-600'
-                      }`}
-                    >
-                      Classificados ({classificadosLista.filter((c) => c.ativo).length})
+                      + Criar Anúncio
                     </button>
                   </div>
 
-                  {/* FEED DO MURAL DE AVISOS (AJUSTÁVEL AO TAMANHO DA IMAGEM) */}
-                  {subAbaMural === 'avisos' ? (
-                    <div className="space-y-4">
-                      {avisosLista.length === 0 ? (
-                        <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl text-xs text-emerald-950 space-y-1">
-                          <p className="font-bold text-sm">🎉 Bem-vindo ao VilaMarket!</p>
-                          <p>
-                            Compre no minimercado autônomo da Vila usando Pix e ganhe 2% de cashback
-                            automático na sua carteira.
-                          </p>
-                        </div>
-                      ) : (
-                        avisosLista.map((aviso) => (
-                          <article
-                            key={aviso.id}
-                            className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm"
-                          >
-                            <div className="p-3.5 border-b border-gray-100 flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <span className="w-7 h-7 rounded-full bg-floresta text-white flex items-center justify-center text-xs font-bold">
-                                  VM
-                                </span>
-                                <div>
-                                  <p className="text-xs font-bold text-grafite">Administração VilaMarket</p>
-                                  <p className="text-[10px] text-gray-400">
-                                    {new Date(aviso.criado_em).toLocaleDateString('pt-BR')}
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-
-                            {aviso.imagem_url && (
-                              <div className="w-full bg-gray-100">
-                                <img
-                                  src={aviso.imagem_url}
-                                  alt={aviso.titulo}
-                                  className="w-full h-auto max-h-[480px] object-contain mx-auto block"
-                                />
-                              </div>
-                            )}
-
-                            <div className="p-4 space-y-1.5">
-                              <h3 className="font-bold text-sm text-grafite">{aviso.titulo}</h3>
-                              <p className="text-xs text-gray-700 whitespace-pre-line leading-relaxed">
-                                {aviso.conteudo}
-                              </p>
-                            </div>
-                          </article>
-                        ))
-                      )}
+                  <div className="space-y-3">
+                    {/* Busca e alternador Meus Anúncios */}
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="Buscar bolo, móvel, serviço..."
+                        value={buscaClassificados}
+                        onChange={(e) => setBuscaClassificados(e.target.value)}
+                        className="flex-1 p-2 border rounded-xl text-xs bg-gray-50 focus:bg-white outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setSomenteMeusAnuncios(!somenteMeusAnuncios)}
+                        className={`px-3 py-2 rounded-xl text-[11px] font-bold border transition shrink-0 ${
+                          somenteMeusAnuncios
+                            ? 'bg-ambar text-white border-ambar'
+                            : 'bg-gray-50 text-gray-700 border-gray-200'
+                        }`}
+                      >
+                        Meus Anúncios
+                      </button>
                     </div>
-                  ) : (
-                    /* CLASSIFICADOS DA VILA COM FILTRO POR TIPO E MEUS ANÚNCIOS */
-                    <div className="space-y-3">
-                      {/* Busca e alternador Meus Anúncios */}
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          placeholder="Buscar bolo, móvel, serviço..."
-                          value={buscaClassificados}
-                          onChange={(e) => setBuscaClassificados(e.target.value)}
-                          className="flex-1 p-2 border rounded-xl text-xs bg-gray-50 focus:bg-white outline-none"
-                        />
+
+                    {/* Barra horizontal deslizável de categorias */}
+                    <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+                      {CATEGORIAS_CLASSIFICADOS.map((cat) => (
                         <button
+                          key={cat}
                           type="button"
-                          onClick={() => setSomenteMeusAnuncios(!somenteMeusAnuncios)}
-                          className={`px-3 py-2 rounded-xl text-[11px] font-bold border transition shrink-0 ${
-                            somenteMeusAnuncios
-                              ? 'bg-ambar text-white border-ambar'
-                              : 'bg-gray-50 text-gray-700 border-gray-200'
+                          onClick={() => setFiltroCategoria(cat)}
+                          className={`px-3 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap transition ${
+                            filtroCategoria === cat
+                              ? 'bg-floresta text-white'
+                              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                           }`}
                         >
-                          Meus Anúncios
+                          {cat}
+                        </button>
+                      ))}
+                    </div>
+
+                    {classificadosFiltrados.length === 0 ? (
+                      <div className="bg-gray-50 border border-dashed border-gray-200 p-6 rounded-xl text-center space-y-2">
+                        <p className="text-xs text-gray-500">
+                          Nenhum anúncio encontrado para este filtro.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAnuncioWhatsapp(perfilDetalhes?.whatsapp || '');
+                            setModalAtivo('novo_anuncio');
+                          }}
+                          className="text-xs font-bold text-floresta underline"
+                        >
+                          Publicar o primeiro anúncio agora
                         </button>
                       </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {classificadosFiltrados.map((item) => {
+                          const ehMeu = item.anunciante_id === usuarioLogado?.perfil_id;
+                          const waLink = item.whatsapp_contato
+                            ? `https://wa.me/55${item.whatsapp_contato.replace(/\D/g, '')}?text=${encodeURIComponent(
+                                `Olá! Vi seu anúncio "${item.titulo}" no VilaMarket.`
+                              )}`
+                            : null;
 
-                      {/* Barra horizontal deslizável de categorias */}
-                      <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar">
-                        {CATEGORIAS_CLASSIFICADOS.map((cat) => (
-                          <button
-                            key={cat}
-                            type="button"
-                            onClick={() => setFiltroCategoria(cat)}
-                            className={`px-3 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap transition ${
-                              filtroCategoria === cat
-                                ? 'bg-floresta text-white'
-                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                            }`}
-                          >
-                            {cat}
-                          </button>
-                        ))}
-                      </div>
+                          return (
+                            <div
+                              key={item.id}
+                              className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm"
+                            >
+                              {item.imagem_url && (
+                                <div className="w-full bg-gray-100">
+                                  <img
+                                    src={item.imagem_url}
+                                    alt={item.titulo}
+                                    className="w-full h-auto max-h-72 object-contain mx-auto block"
+                                  />
+                                </div>
+                              )}
 
-                      {classificadosFiltrados.length === 0 ? (
-                        <div className="bg-gray-50 border border-dashed border-gray-200 p-6 rounded-xl text-center space-y-2">
-                          <p className="text-xs text-gray-500">
-                            Nenhum anúncio encontrado para este filtro.
-                          </p>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setAnuncioWhatsapp(perfilDetalhes?.whatsapp || '');
-                              setModalAtivo('novo_anuncio');
-                            }}
-                            className="text-xs font-bold text-floresta underline"
-                          >
-                            Publicar o primeiro anúncio agora
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="space-y-3">
-                          {classificadosFiltrados.map((item) => {
-                            const ehMeu = item.anunciante_id === usuarioLogado?.perfil_id;
-                            const waLink = item.whatsapp_contato
-                              ? `https://wa.me/55${item.whatsapp_contato.replace(/\D/g, '')}?text=${encodeURIComponent(
-                                  `Olá! Vi seu anúncio "${item.titulo}" no VilaMarket.`
-                                )}`
-                              : null;
-
-                            return (
-                              <div
-                                key={item.id}
-                                className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm"
-                              >
-                                {item.imagem_url && (
-                                  <div className="w-full bg-gray-100">
-                                    <img
-                                      src={item.imagem_url}
-                                      alt={item.titulo}
-                                      className="w-full h-auto max-h-72 object-contain mx-auto block"
-                                    />
-                                  </div>
-                                )}
-
-                                <div className="p-3.5 space-y-2">
-                                  <div className="flex items-start justify-between gap-2">
-                                    <div>
-                                      <div className="flex flex-wrap gap-1 mb-1">
-                                        <span className="text-[10px] font-bold bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded-full">
-                                          {item.tipo_anuncio || 'Geral'}
-                                        </span>
-                                        <span className="text-[10px] font-semibold bg-gray-100 text-gray-700 px-2 py-0.5 rounded-full">
-                                          {item.condicao || 'Novo'}
-                                        </span>
-                                        {!item.ativo && (
-                                          <span className="text-[10px] font-bold bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
-                                            Pausado / Vendido
-                                          </span>
-                                        )}
-                                      </div>
-                                      <h3 className="font-bold text-sm text-grafite">{item.titulo}</h3>
-                                    </div>
-                                    <span className="font-extrabold text-sm text-floresta shrink-0">
-                                      {Number(item.preco) > 0
-                                        ? `R$ ${Number(item.preco).toFixed(2).replace('.', ',')}`
-                                        : 'A combinar'}
-                                    </span>
-                                  </div>
-
-                                  {item.descricao && (
-                                    <p className="text-xs text-gray-600 whitespace-pre-line">
-                                      {item.descricao}
-                                    </p>
-                                  )}
-
-                                  <div className="pt-2 border-t border-gray-100 flex items-center justify-between gap-2">
-                                    <div className="text-[10px] text-gray-500 truncate">
-                                      <span className="font-bold text-gray-700">
-                                        {item.perfis?.nome_completo || 'Morador da Vila'}
+                              <div className="p-3.5 space-y-2">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div>
+                                    <div className="flex flex-wrap gap-1 mb-1">
+                                      <span className="text-[10px] font-bold bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded-full">
+                                        {item.tipo_anuncio || 'Geral'}
                                       </span>
-                                      {item.perfis?.unidade_formatada && (
-                                        <span className="block truncate">
-                                          {item.perfis.unidade_formatada}
+                                      <span className="text-[10px] font-semibold bg-gray-100 text-gray-700 px-2 py-0.5 rounded-full">
+                                        {item.condicao || 'Novo'}
+                                      </span>
+                                      {!item.ativo && (
+                                        <span className="text-[10px] font-bold bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
+                                          Pausado / Vendido
                                         </span>
                                       )}
                                     </div>
+                                    <h3 className="font-bold text-sm text-grafite">{item.titulo}</h3>
+                                  </div>
+                                  <span className="font-extrabold text-sm text-floresta shrink-0">
+                                    {Number(item.preco) > 0
+                                      ? `R$ ${Number(item.preco).toFixed(2).replace('.', ',')}`
+                                      : 'A combinar'}
+                                  </span>
+                                </div>
 
-                                    {ehMeu ? (
-                                      <div className="flex gap-1.5 shrink-0">
-                                        <button
-                                          type="button"
-                                          onClick={() => alternarStatusMeuAnuncio(item)}
-                                          className="text-[11px] font-bold px-2.5 py-1.5 rounded-lg bg-amber-100 text-amber-900"
-                                        >
-                                          {item.ativo ? 'Marcar Vendido' : 'Reativar'}
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => excluirAnuncio(item.id)}
-                                          className="text-[11px] font-bold px-2.5 py-1.5 rounded-lg bg-red-50 text-red-600"
-                                        >
-                                          Excluir
-                                        </button>
-                                      </div>
-                                    ) : (
-                                      waLink && (
-                                        <a
-                                          href={waLink}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-xl shrink-0 transition"
-                                        >
-                                          💬 Chamar no WhatsApp
-                                        </a>
-                                      )
+                                {item.descricao && (
+                                  <p className="text-xs text-gray-600 whitespace-pre-line">
+                                    {item.descricao}
+                                  </p>
+                                )}
+
+                                <div className="pt-2 border-t border-gray-100 flex items-center justify-between gap-2">
+                                  <div className="text-[10px] text-gray-500 truncate">
+                                    <span className="font-bold text-gray-700">
+                                      {item.perfis?.nome_completo || 'Morador da Vila'}
+                                    </span>
+                                    {item.perfis?.unidade_formatada && (
+                                      <span className="block truncate">
+                                        {item.perfis.unidade_formatada}
+                                      </span>
                                     )}
                                   </div>
+
+                                  {ehMeu ? (
+                                    <div className="flex gap-1.5 shrink-0">
+                                      <button
+                                        type="button"
+                                        onClick={() => alternarStatusMeuAnuncio(item)}
+                                        className="text-[11px] font-bold px-2.5 py-1.5 rounded-lg bg-amber-100 text-amber-900"
+                                      >
+                                        {item.ativo ? 'Marcar Vendido' : 'Reativar'}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => excluirAnuncio(item.id)}
+                                        className="text-[11px] font-bold px-2.5 py-1.5 rounded-lg bg-red-50 text-red-600"
+                                      >
+                                        Excluir
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    waLink && (
+                                      <a
+                                        href={waLink}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-xl shrink-0 transition"
+                                      >
+                                        💬 Chamar no WhatsApp
+                                      </a>
+                                    )
+                                  )}
                                 </div>
                               </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -3494,14 +3476,14 @@ export default function VilaMarketApp() {
         </div>
       )}
 
-      {/* BARRA DE NAVEGAÇÃO INFERIOR (CONVENÇÕES DE DESIGN UX: HIT TARGET ~56x48px) */}
+      {/* BARRA DE NAVEGAÇÃO INFERIOR (CONVENÇÕES DE DESIGN UX: HIT TARGET ~48x48px) */}
       {aba === 'painel' && usuarioLogado && (
-        <nav className="fixed bottom-3 left-0 right-0 px-4 z-40 pointer-events-none">
-          <div className="max-w-md mx-auto bg-white/95 backdrop-blur border border-gray-200 shadow-lg rounded-2xl px-2 py-1.5 flex items-center justify-around pointer-events-auto">
+        <nav className="fixed bottom-3 left-0 right-0 px-2 z-40 pointer-events-none">
+          <div className="max-w-md mx-auto bg-white/95 backdrop-blur border border-gray-200 shadow-lg rounded-2xl px-1.5 py-1.5 flex items-center justify-between gap-0.5 pointer-events-auto">
             <button
               type="button"
               onClick={() => setAbaInferior('inicio')}
-              className={`min-w-[56px] min-h-[48px] px-2.5 py-1.5 rounded-xl flex flex-col items-center justify-center transition ${
+              className={`flex-1 min-h-[48px] px-1 py-1.5 rounded-xl flex flex-col items-center justify-center transition ${
                 abaInferior === 'inicio'
                   ? 'bg-emerald-50 text-floresta font-bold'
                   : 'text-gray-500 hover:bg-gray-50'
@@ -3514,7 +3496,7 @@ export default function VilaMarketApp() {
             <button
               type="button"
               onClick={() => setAbaInferior('mural')}
-              className={`min-w-[56px] min-h-[48px] px-2.5 py-1.5 rounded-xl flex flex-col items-center justify-center transition ${
+              className={`flex-1 min-h-[48px] px-1 py-1.5 rounded-xl flex flex-col items-center justify-center transition ${
                 abaInferior === 'mural'
                   ? 'bg-emerald-50 text-floresta font-bold'
                   : 'text-gray-500 hover:bg-gray-50'
@@ -3526,8 +3508,21 @@ export default function VilaMarketApp() {
 
             <button
               type="button"
+              onClick={() => setAbaInferior('classificados')}
+              className={`flex-1 min-h-[48px] px-1 py-1.5 rounded-xl flex flex-col items-center justify-center transition ${
+                abaInferior === 'classificados'
+                  ? 'bg-emerald-50 text-floresta font-bold'
+                  : 'text-gray-500 hover:bg-gray-50'
+              }`}
+            >
+              <span className="text-base leading-none">🏷️</span>
+              <span className="text-[10px] mt-1">Anúncios</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setAbaInferior('ajuda')}
-              className={`min-w-[56px] min-h-[48px] px-2.5 py-1.5 rounded-xl flex flex-col items-center justify-center transition ${
+              className={`flex-1 min-h-[48px] px-1 py-1.5 rounded-xl flex flex-col items-center justify-center transition ${
                 abaInferior === 'ajuda'
                   ? 'bg-emerald-50 text-floresta font-bold'
                   : 'text-gray-500 hover:bg-gray-50'
@@ -3540,7 +3535,7 @@ export default function VilaMarketApp() {
             <button
               type="button"
               onClick={() => setAbaInferior('perfil')}
-              className={`min-w-[56px] min-h-[48px] px-2.5 py-1.5 rounded-xl flex flex-col items-center justify-center transition ${
+              className={`flex-1 min-h-[48px] px-1 py-1.5 rounded-xl flex flex-col items-center justify-center transition ${
                 abaInferior === 'perfil'
                   ? 'bg-emerald-50 text-floresta font-bold'
                   : 'text-gray-500 hover:bg-gray-50'
@@ -3554,7 +3549,7 @@ export default function VilaMarketApp() {
               <button
                 type="button"
                 onClick={() => setAbaInferior('admin')}
-                className={`min-w-[56px] min-h-[48px] px-2.5 py-1.5 rounded-xl flex flex-col items-center justify-center transition ${
+                className={`flex-1 min-h-[48px] px-1 py-1.5 rounded-xl flex flex-col items-center justify-center transition ${
                   abaInferior === 'admin'
                     ? 'bg-emerald-50 text-floresta font-bold'
                     : 'text-gray-500 hover:bg-gray-50'
