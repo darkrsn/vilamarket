@@ -725,13 +725,11 @@ export default function VilaMarketApp() {
     setCarregando(true);
 
     try {
-      // 1. Envia a foto para o Bucket Privado 'selfies'
       const caminhoPrivado = await enviarSelfieParaStoragePrivado(
         fotoCapturada,
         usuarioLogado.perfil_id
       );
 
-      // 2. Grava o caminho no banco via RPC segura (garante atualização sem bloqueio de RLS)
       const { data: rpcRes, error: rpcErr } = await supabase.rpc('atualizar_selfie_usuario', {
         p_perfil_id: usuarioLogado.perfil_id,
         p_caminho_selfie: caminhoPrivado,
@@ -741,7 +739,6 @@ export default function VilaMarketApp() {
         throw new Error(rpcErr?.message || rpcRes?.mensagem || 'Falha ao vincular foto no perfil.');
       }
 
-      // 3. Atualiza os estados na tela IMEDIATAMENTE para remover o aviso amarelo e exibir a foto
       setSelfieTemporariaUrl(fotoCapturada);
       setPerfilDetalhes((prev: any) => ({
         ...(prev || {}),
@@ -757,7 +754,6 @@ export default function VilaMarketApp() {
       setUsuarioLogado(usuarioAtualizado);
       salvarSessaoNoNavegador(usuarioAtualizado);
 
-      // 4. Fecha o modal e mostra confirmação limpa no topo da tela
       setFotoCapturada(null);
       setModoTrocaSelfie(false);
       setModalAtivo(null);
@@ -766,7 +762,6 @@ export default function VilaMarketApp() {
         texto: '✅ Selfie salva e sincronizada! Seu acesso facial na porta já está ativo.',
       });
 
-      // Atualiza também em segundo plano pelo banco
       carregarDadosDashboard();
     } catch (err: any) {
       alert('Erro ao salvar selfie: ' + (err.message || 'Tente novamente.'));
@@ -1325,18 +1320,18 @@ export default function VilaMarketApp() {
             </form>
           )}
 
-          {/* ABA 5: PAINEL DO MORADOR LOGADO (DASHBOARD COMPLETA) */}
+          {/* ABA 5: PAINEL DO MORADOR LOGADO (LAYOUT CLEAN) */}
           {aba === 'painel' && usuarioLogado && (
             <div className="space-y-5">
-              {/* SUB-ABA INÍCIO */}
+              {/* SUB-ABA INÍCIO (CLEAN: MINIATURA CLICÁVEL + SALDOS + DEPENDENTES) */}
               {abaInferior === 'inicio' && (
                 <>
-                  {/* Card de Boas-Vindas (O aviso amarelo de selfie some automaticamente quando a selfie já foi enviada) */}
+                  {/* Card de Boas-Vindas Clean */}
                   {!temSelfie ? (
                     <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl">
                       <div className="flex items-center justify-between gap-2">
                         <p className="text-xs font-bold uppercase text-amber-800">
-                          ⚠️ Acesso Facial Porta • Selfie Pendente
+                          ⚠️ Selfie Facial Pendente
                         </p>
                         <button
                           type="button"
@@ -1354,26 +1349,41 @@ export default function VilaMarketApp() {
                       </p>
                     </div>
                   ) : (
-                    <div className="bg-emerald-50/80 border border-emerald-200 p-4 rounded-xl flex items-center justify-between gap-3">
-                      <div>
+                    <div className="bg-emerald-50/70 border border-emerald-200 p-4 rounded-xl flex items-center justify-between gap-3">
+                      <div className="min-w-0">
                         <p className="text-[11px] font-bold uppercase text-emerald-800">
-                          ✅ Acesso Facial Porta Ativo
+                          ✅ Acesso Facial Ativo
                         </p>
-                        <h2 className="text-lg font-bold text-grafite mt-0.5">
+                        <h2 className="text-lg font-bold text-grafite truncate mt-0.5">
                           Olá, {usuarioLogado.nome_completo}
                         </h2>
-                        <p className="text-xs text-gray-600">
+                        <p className="text-xs text-gray-600 truncate">
                           {usuarioLogado.unidade_formatada || usuarioLogado.unidade}
                         </p>
                       </div>
-                      {selfieTemporariaUrl && (
-                        <img
-                          src={selfieTemporariaUrl}
-                          alt="Foto do morador"
-                          onClick={abrirModalSelfie}
-                          className="w-12 h-12 rounded-full object-cover border-2 border-emerald-600 shadow-sm cursor-pointer shrink-0"
-                        />
-                      )}
+
+                      {/* Miniatura clicável para ampliar e avaliar nitidez */}
+                      <button
+                        type="button"
+                        onClick={abrirModalSelfie}
+                        title="Toque para ampliar ou atualizar sua selfie"
+                        className="flex flex-col items-center shrink-0 group"
+                      >
+                        {selfieTemporariaUrl ? (
+                          <img
+                            src={selfieTemporariaUrl}
+                            alt="Miniatura da selfie"
+                            className="w-14 h-14 rounded-full object-cover border-2 border-emerald-600 shadow-sm group-hover:scale-105 transition"
+                          />
+                        ) : (
+                          <div className="w-14 h-14 rounded-full bg-emerald-100 border-2 border-emerald-600 flex items-center justify-center text-lg">
+                            👤
+                          </div>
+                        )}
+                        <span className="text-[10px] text-emerald-800 font-semibold mt-1">
+                          Ampliar
+                        </span>
+                      </button>
                     </div>
                   )}
 
@@ -1403,80 +1413,7 @@ export default function VilaMarketApp() {
                     </div>
                   </div>
 
-                  {/* 1. Grade de Botões de Ação Rápida */}
-                  <div>
-                    <h3 className="text-xs font-bold uppercase text-gray-500 mb-2">
-                      Ações Rápidas
-                    </h3>
-                    <div className="grid grid-cols-3 gap-2.5">
-                      <button
-                        type="button"
-                        onClick={abrirModalSelfie}
-                        className={`flex flex-col items-center justify-center p-3 border rounded-xl text-center transition ${
-                          temSelfie
-                            ? 'bg-emerald-50/70 hover:bg-emerald-100 border-emerald-300'
-                            : 'bg-gray-50 hover:bg-emerald-50 border-gray-200'
-                        }`}
-                      >
-                        {temSelfie ? (
-                          <>
-                            <div className="relative mb-1">
-                              {selfieTemporariaUrl ? (
-                                <img
-                                  src={selfieTemporariaUrl}
-                                  alt="Sua selfie"
-                                  className="w-7 h-7 rounded-full object-cover border border-emerald-600"
-                                />
-                              ) : (
-                                <span className="text-xl">🔒</span>
-                              )}
-                              <span className="absolute -bottom-1 -right-1 text-[10px]">✅</span>
-                            </div>
-                            <span className="text-xs font-bold text-emerald-900 leading-tight">
-                              Selfie Enviada
-                            </span>
-                            <span className="text-[10px] text-emerald-700 font-medium">
-                              Ver / Mudar
-                            </span>
-                          </>
-                        ) : (
-                          <>
-                            <span className="text-xl mb-1">📷</span>
-                            <span className="text-xs font-bold text-grafite leading-tight">
-                              Minha Selfie
-                            </span>
-                            <span className="text-[10px] text-gray-500">Enviar Foto</span>
-                          </>
-                        )}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setModalAtivo('pin')}
-                        className="flex flex-col items-center justify-center p-3 bg-gray-50 hover:bg-emerald-50 border border-gray-200 rounded-xl text-center transition"
-                      >
-                        <span className="text-xl mb-1">🔐</span>
-                        <span className="text-xs font-bold text-grafite leading-tight">
-                          Alterar PIN
-                        </span>
-                        <span className="text-[10px] text-gray-500">4 dígitos</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={abrirModalExtrato}
-                        className="flex flex-col items-center justify-center p-3 bg-gray-50 hover:bg-emerald-50 border border-gray-200 rounded-xl text-center transition"
-                      >
-                        <span className="text-xl mb-1">📄</span>
-                        <span className="text-xs font-bold text-grafite leading-tight">
-                          Extrato
-                        </span>
-                        <span className="text-[10px] text-gray-500">Histórico</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* 2. Seção Meus Dependentes (Se titular ou admin) */}
+                  {/* Seção Meus Dependentes (Se titular ou admin) */}
                   {(roleUsuario === 'titular' || roleUsuario === 'admin') && (
                     <div className="pt-3 border-t border-gray-200 space-y-3">
                       <div className="flex items-center justify-between">
@@ -1495,7 +1432,7 @@ export default function VilaMarketApp() {
                           }}
                           className="bg-floresta hover:bg-floresta-claro text-white text-xs font-bold px-3 py-2 rounded-xl transition"
                         >
-                          + Adicionar Dependente
+                          + Adicionar
                         </button>
                       </div>
 
@@ -1576,27 +1513,108 @@ export default function VilaMarketApp() {
                 </div>
               )}
 
-              {/* SUB-ABA PERFIL / SAIR + PRIVACIDADE LGPD */}
+              {/* SUB-ABA PERFIL / SAIR (COM SELFIE EM DESTAQUE, ALTERAR PIN E EXTRATO) */}
               {abaInferior === 'perfil' && (
                 <div className="space-y-4">
-                  <h2 className="text-lg font-bold text-grafite">Meu Perfil & Privacidade</h2>
-                  <div className="bg-gray-50 border border-gray-200 p-4 rounded-xl text-xs space-y-2 text-gray-700">
-                    <p>
-                      <strong>Morador:</strong> {usuarioLogado.nome_completo}
-                    </p>
-                    <p>
-                      <strong>Unidade:</strong>{' '}
-                      {usuarioLogado.unidade_formatada || usuarioLogado.unidade}
-                    </p>
-                    <p>
-                      <strong>Perfil:</strong> {roleUsuario.toUpperCase()}
-                    </p>
-                    <p>
-                      <strong>Acesso Facial:</strong>{' '}
-                      {temSelfie
-                        ? '✅ Selfie protegida por criptografia LGPD'
-                        : '⚠️ Pendente de envio'}
-                    </p>
+                  <h2 className="text-lg font-bold text-grafite">Meu Perfil</h2>
+
+                  {/* Cartão do Morador com Foto em Destaque */}
+                  <div className="bg-gray-50 border border-gray-200 p-4 rounded-xl flex items-center gap-3.5">
+                    <button
+                      type="button"
+                      onClick={abrirModalSelfie}
+                      className="relative shrink-0 group"
+                      title="Toque para ampliar ou atualizar foto"
+                    >
+                      {temSelfie && selfieTemporariaUrl ? (
+                        <img
+                          src={selfieTemporariaUrl}
+                          alt="Selfie do perfil"
+                          className="w-16 h-16 rounded-full object-cover border-2 border-floresta shadow-sm group-hover:opacity-90 transition"
+                        />
+                      ) : (
+                        <div className="w-16 h-16 rounded-full bg-amber-100 border-2 border-amber-400 flex items-center justify-center text-2xl">
+                          📷
+                        </div>
+                      )}
+                      <span className="absolute -bottom-1 -right-1 bg-white border border-gray-200 rounded-full px-1.5 py-0.5 text-[9px] font-bold text-grafite shadow-sm">
+                        🔍
+                      </span>
+                    </button>
+
+                    <div className="text-xs space-y-1 text-gray-700 min-w-0">
+                      <p className="font-bold text-sm text-grafite truncate">
+                        {usuarioLogado.nome_completo}
+                      </p>
+                      <p className="text-gray-600 truncate">
+                        {usuarioLogado.unidade_formatada || usuarioLogado.unidade}
+                      </p>
+                      <p className="text-[11px] font-semibold text-emerald-700">
+                        {temSelfie
+                          ? '✅ Facial ativo (toque na foto para ampliar)'
+                          : '⚠️ Selfie pendente para porta'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Ações da Conta (Minha Selfie, Alterar PIN, Extrato) */}
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={abrirModalSelfie}
+                      className="w-full flex items-center justify-between p-3.5 bg-white hover:bg-emerald-50/60 border border-gray-200 rounded-xl transition text-left"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="text-xl">📷</span>
+                        <div>
+                          <p className="text-xs font-bold text-grafite">
+                            Minha Selfie (Acesso Facial)
+                          </p>
+                          <p className="text-[11px] text-gray-500">
+                            {temSelfie
+                              ? 'Ampliar foto atual para conferir qualidade ou tirar nova'
+                              : 'Cadastrar foto do rosto para liberar a porta'}
+                          </p>
+                        </div>
+                      </div>
+                      <span className="text-gray-400 text-xs">›</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setModalAtivo('pin')}
+                      className="w-full flex items-center justify-between p-3.5 bg-white hover:bg-emerald-50/60 border border-gray-200 rounded-xl transition text-left"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="text-xl">🔐</span>
+                        <div>
+                          <p className="text-xs font-bold text-grafite">Alterar PIN (4 dígitos)</p>
+                          <p className="text-[11px] text-gray-500">
+                            Senha numérica do aplicativo e do caixa
+                          </p>
+                        </div>
+                      </div>
+                      <span className="text-gray-400 text-xs">›</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={abrirModalExtrato}
+                      className="w-full flex items-center justify-between p-3.5 bg-white hover:bg-emerald-50/60 border border-gray-200 rounded-xl transition text-left"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="text-xl">📄</span>
+                        <div>
+                          <p className="text-xs font-bold text-grafite">
+                            Extrato & Histórico Cashback
+                          </p>
+                          <p className="text-[11px] text-gray-500">
+                            Acompanhe recargas, compras e bônus de 2%
+                          </p>
+                        </div>
+                      </div>
+                      <span className="text-gray-400 text-xs">›</span>
+                    </button>
                   </div>
 
                   <button
@@ -1614,8 +1632,7 @@ export default function VilaMarketApp() {
 
                   <div className="pt-2 border-t border-gray-200 text-center space-y-2">
                     <p className="text-[11px] text-gray-400">
-                      Seus dados pessoais e biométricos são armazenados exclusivamente em banco
-                      privado do VilaMarket (LGPD).
+                      Dados protegidos em banco privado do VilaMarket conforme a LGPD.
                     </p>
                     <button
                       type="button"
@@ -1650,34 +1667,34 @@ export default function VilaMarketApp() {
       </div>
 
       {/* ===================================================================== */}
-      {/* MODAL 1: MINHA SELFIE COM GUIA OVAL E ANÁLISE DE LUZ / ENQUADRAMENTO  */}
+      {/* MODAL 1: MINHA SELFIE (AMPLIADA PARA AVALIAR QUALIDADE OU TROCAR)     */}
       {/* ===================================================================== */}
       {modalAtivo === 'selfie' && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="font-bold text-base text-grafite">Minha Selfie (Acesso Facial)</h3>
               {temSelfie && !modoTrocaSelfie && (
                 <span className="text-[11px] font-bold bg-emerald-100 text-emerald-800 px-2.5 py-0.5 rounded-full">
-                  ✅ Protegida LGPD
+                  ✅ Ativa
                 </span>
               )}
             </div>
 
             {temSelfie && !modoTrocaSelfie && !fotoCapturada ? (
               <div className="space-y-3 text-center">
-                <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 p-2.5 rounded-xl">
-                  Sua selfie está armazenada em cofre privado (Storage RLS) e sincronizada com o
-                  leitor facial da porta.
+                <p className="text-xs text-gray-600">
+                  Verifique se o seu rosto está bem iluminado e nítido para abertura rápida na
+                  porta:
                 </p>
                 {selfieTemporariaUrl ? (
                   <img
                     src={selfieTemporariaUrl}
-                    alt="Selfie cadastrada"
-                    className="w-48 h-48 mx-auto object-cover rounded-2xl border-2 border-emerald-600 shadow-sm"
+                    alt="Selfie ampliada"
+                    className="w-64 h-64 mx-auto object-cover rounded-2xl border-2 border-emerald-600 shadow-md"
                   />
                 ) : (
-                  <div className="w-48 h-48 mx-auto flex items-center justify-center bg-gray-100 rounded-2xl text-xs text-gray-500">
+                  <div className="w-64 h-64 mx-auto flex items-center justify-center bg-gray-100 rounded-2xl text-xs text-gray-500">
                     Carregando imagem segura...
                   </div>
                 )}
@@ -1686,7 +1703,7 @@ export default function VilaMarketApp() {
                   onClick={iniciarCameraSelfie}
                   className="w-full bg-floresta hover:bg-floresta-claro text-white font-bold py-3 rounded-xl text-xs transition"
                 >
-                  📷 Tirar Nova Foto / Mudar Selfie
+                  📷 Tirar Nova Foto / Atualizar Selfie
                 </button>
               </div>
             ) : !fotoCapturada ? (
