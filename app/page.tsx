@@ -2259,7 +2259,7 @@ export default function VilaMarketApp() {
                   </div>
 
                   <a
-                    href="https://wa.me/5541999999999?text=Ol%C3%A1!%20Preciso%20de%20ajuda%20com%20o%20app%20VilaMarket."
+                    href="https://wa.me/5541991455623?text=Ol%C3%A1!%20Preciso%20de%20ajuda%20com%20o%20app%20VilaMarket."
                     target="_blank"
                     rel="noopener noreferrer"
                     className="block w-full text-center bg-floresta hover:bg-floresta-claro text-white font-bold py-3 rounded-xl text-xs transition"
