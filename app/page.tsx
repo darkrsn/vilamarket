@@ -72,6 +72,61 @@ function formatarCPFVisual(valor: string): string {
     .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
 }
 
+// Redimensiona e comprime imagens pesadas antes de enviar ao Supabase (~350-500 KB, alta nitidez)
+async function otimizarImagemParaUpload(file: File, larguraMax = 1200): Promise<File> {
+  if (!file.type.startsWith('image/')) return file;
+
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let largura = img.width;
+        let altura = img.height;
+
+        if (largura > larguraMax) {
+          altura = Math.round((altura * larguraMax) / largura);
+          largura = larguraMax;
+        }
+
+        canvas.width = largura;
+        canvas.height = altura;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Erro ao processar imagem no navegador.'));
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, largura, altura);
+
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) {
+              reject(new Error('Falha na compactação da imagem.'));
+              return;
+            }
+            const nomeLimpo = file.name.replace(/\.[^/.]+$/, '') + '.jpg';
+            resolve(
+              new File([blob], nomeLimpo, {
+                type: 'image/jpeg',
+                lastModified: Date.now(),
+              })
+            );
+          },
+          'image/jpeg',
+          0.88
+        );
+      };
+      img.onerror = () => reject(new Error('Não foi possível ler a imagem selecionada.'));
+    };
+    reader.onerror = () => reject(new Error('Erro ao carregar o arquivo.'));
+  });
+}
+
 export default function VilaMarketApp() {
   const [aba, setAba] = useState<'login' | 'cadastro' | 'confirmar_wa' | 'esqueci_pin' | 'painel'>('login');
   const [abaInferior, setAbaInferior] = useState<
@@ -192,8 +247,9 @@ export default function VilaMarketApp() {
     if (aba === 'cadastro' && unidades.length === 0) {
       carregarUnidades();
     }
+
     if (aba === 'painel' && usuarioLogado?.perfil_id) {
-      // Limpeza imediata de vestígios da conta anterior para evitar conflito de foto e perfil/admin
+      // Limpa dados residuais de sessões anteriores antes de carregar o novo perfil
       setPerfilDetalhes(null);
       setSelfieTemporariaUrl(null);
       setDependentesLista([]);
@@ -495,11 +551,12 @@ export default function VilaMarketApp() {
   }
 
   async function enviarFotoPublicaComunidade(file: File, pasta: 'classificados' | 'mural'): Promise<string> {
-    const ext = file.name.split('.').pop() || 'jpg';
-    const caminho = `${pasta}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    // Otimiza para largura máxima de 1200px (Full HD) e 88% JPEG (~350-500 KB)
+    const arquivoOtimizado = await otimizarImagemParaUpload(file, 1200);
+    const caminho = `${pasta}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
 
-    const { error } = await supabase.storage.from('comunidade').upload(caminho, file, {
-      contentType: file.type || 'image/jpeg',
+    const { error } = await supabase.storage.from('comunidade').upload(caminho, arquivoOtimizado, {
+      contentType: 'image/jpeg',
       upsert: true,
     });
 
@@ -566,6 +623,7 @@ export default function VilaMarketApp() {
     const idAlvo = usuarioLogado?.perfil_id;
     if (!idAlvo) return;
 
+    // 1. Se já veio o caminho da selfie no login, busca imediatamente
     if (usuarioLogado?.selfie_url) {
       gerarUrlTemporariaSelfie(usuarioLogado.selfie_url).then((url) => {
         if (url && usuarioLogado?.perfil_id === idAlvo) {
@@ -576,6 +634,7 @@ export default function VilaMarketApp() {
       setSelfieTemporariaUrl(null);
     }
 
+    // 2. Busca os dados atualizados direto do banco
     const [resPerfil, resDeps] = await Promise.all([
       supabase
         .from('perfis')
@@ -907,7 +966,7 @@ export default function VilaMarketApp() {
   }
 
   // =========================================================================
-  // LOGIN, CADASTRO E WHATSAPP
+  // LOGIN, CADASTRO E WHATSAPP (ENVIA APENAS OS 11 NÚMEROS LIMPOS AO BANCO)
   // =========================================================================
   async function fazerLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -932,12 +991,6 @@ export default function VilaMarketApp() {
     }
 
     if (data?.sucesso) {
-      // Zera completamente estados anteriores ao logar em uma nova conta
-      setSelfieTemporariaUrl(null);
-      setPerfilDetalhes(null);
-      setDependentesLista([]);
-      setDependentesSelfiesMap({});
-      
       setUsuarioLogado(data);
       salvarSessaoNoNavegador(data);
       setAba('painel');
@@ -1056,8 +1109,6 @@ export default function VilaMarketApp() {
       return;
     }
 
-    setSelfieTemporariaUrl(null);
-    setPerfilDetalhes(null);
     setUsuarioLogado(loginData);
     salvarSessaoNoNavegador(loginData);
     setMensagem(null);
@@ -1472,10 +1523,7 @@ export default function VilaMarketApp() {
 
       alert('Seus dados biométricos foram removidos e seu acesso foi encerrado conforme a LGPD.');
       limparSessaoDoNavegador();
-      try { sessionStorage.clear(); } catch {}
       setUsuarioLogado(null);
-      setPerfilDetalhes(null);
-      setSelfieTemporariaUrl(null);
       setPin('');
       setAba('login');
     } catch {
