@@ -188,21 +188,29 @@ export default function VilaMarketApp() {
     return () => pararAnaliseCamera();
   }, []);
 
-  useEffect(() => {
+useEffect(() => {
     if (aba === 'cadastro' && unidades.length === 0) {
       carregarUnidades();
     }
+
     if (aba === 'painel' && usuarioLogado?.perfil_id) {
+      // Limpa dados residuais de sessões anteriores antes de carregar o novo perfil
+      setPerfilDetalhes(null);
+      setSelfieTemporariaUrl(null);
+      setDependentesLista([]);
+      setDependentesSelfiesMap({});
+
       carregarDadosDashboard();
       carregarMuralEClassificados();
     }
   }, [aba, usuarioLogado?.perfil_id]);
 
   useEffect(() => {
-    if (aba === 'painel' && abaInferior === 'admin' && (perfilDetalhes?.role === 'admin' || usuarioLogado?.role === 'admin')) {
+    const ehAdmin = perfilDetalhes?.role === 'admin' || usuarioLogado?.role === 'admin';
+    if (aba === 'painel' && abaInferior === 'admin' && ehAdmin) {
       carregarDadosAdmin();
     }
-  }, [aba, abaInferior]);
+  }, [aba, abaInferior, perfilDetalhes?.role, usuarioLogado?.role]);
 
   // =========================================================================
   // MOTOR DE ANÁLISE BIOMÉTRICA REAL (ENQUADRAMENTO OVAL + LUZ + DETALHES)
@@ -2416,20 +2424,22 @@ export default function VilaMarketApp() {
                     className="w-full py-3 text-xs font-bold text-gray-700 border border-gray-300 rounded-xl hover:bg-gray-50"
                   >
                     Sair da Conta
-                  </button>
-
-                  <div className="pt-2 border-t border-gray-200 text-center space-y-2">
-                    <p className="text-[11px] text-gray-400">
-                      Dados protegidos em banco privado do VilaMarket conforme a LGPD.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={solicitarExclusaoDadosLgpd}
-                      disabled={carregando}
-                      className="text-[11px] text-red-600 font-semibold hover:underline"
-                    >
-                      Excluir minha selfie e encerrar cadastro (Direito LGPD)
-                    </button>
+                  <button
+  type="button"
+  onClick={() => {
+    limparSessaoDoNavegador();
+    setUsuarioLogado(null);
+    setPerfilDetalhes(null);
+    setSelfieTemporariaUrl(null);
+    setDependentesLista([]);
+    setDependentesSelfiesMap({});
+    setPin('');
+    setAba('login');
+  }}
+  className="w-full py-3 text-xs font-bold text-gray-700 border border-gray-300 rounded-xl hover:bg-gray-50"
+>
+  Sair da Conta
+</button>
                   </div>
                 </div>
               )}
