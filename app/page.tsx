@@ -132,6 +132,7 @@ export default function VilaMarketApp() {
       };
     }
 
+    // Recorte central 1:1 idêntico à captura final
     const menorLado = Math.min(video.videoWidth, video.videoHeight);
     const sx = (video.videoWidth - menorLado) / 2;
     const sy = (video.videoHeight - menorLado) / 2;
@@ -175,7 +176,7 @@ export default function VilaMarketApp() {
         luzOk: false,
         detalhesOk: false,
         enquadramentoOk: false,
-        mensagem: 'Pouca luz! Vá para um local mais iluminado ou vire-se para a luz.',
+        mensagem: 'Pouca luz! Vá para um local mais iluminado.',
       };
     }
     if (mediaBrilho > 238) {
@@ -184,17 +185,15 @@ export default function VilaMarketApp() {
         luzOk: false,
         detalhesOk: false,
         enquadramentoOk: false,
-        mensagem: 'Excesso de luz (contra janela/lâmpada). Evite luz forte atrás de você.',
+        mensagem: 'Excesso de luz atrás de você. Evite ficar contra janela/lâmpada.',
       };
     }
 
-    // 2. Densidade de detalhes dentro do oval vs. bordas
-    let contrasteCentro = 0;
-    let countCentro = 0;
-    let contrasteBordaEsq = 0;
-    let countBordaEsq = 0;
-    let contrasteBordaDir = 0;
-    let countBordaDir = 0;
+    // 2. Nitidez (Laplaciano) separada por metade superior e inferior do oval
+    let contrasteSup = 0;
+    let countSup = 0;
+    let contrasteInf = 0;
+    let countInf = 0;
 
     for (let y = 2; y < tamanho - 2; y++) {
       for (let x = 2; x < tamanho - 2; x++) {
@@ -211,68 +210,26 @@ export default function VilaMarketApp() {
         const normX = (x - cx) / rx;
         const normY = (y - cy) / ry;
 
-        if (normX * normX + normY * normY <= 0.75) {
-          contrasteCentro += lap;
-          countCentro++;
-        } else if (x < tamanho * 0.22) {
-          contrasteBordaEsq += lap;
-          countBordaEsq++;
-        } else if (x > tamanho * 0.78) {
-          contrasteBordaDir += lap;
-          countBordaDir++;
-        }
-      }
-    }
-
-    const nitidezCentro = contrasteCentro / Math.max(1, countCentro);
-    const nitidezEsq = contrasteBordaEsq / Math.max(1, countBordaEsq);
-    const nitidezDir = contrasteBordaDir / Math.max(1, countBordaDir);
-
-    // 3. Verificação da região dos olhos (simetria e contraste testa-olhos-bochecha)
-    let brilhoTesta = 0;
-    let countTesta = 0;
-    let brilhoOlhosEsq = 0;
-    let countOlhosEsq = 0;
-    let brilhoOlhosDir = 0;
-    let countOlhosDir = 0;
-    let brilhoBochecha = 0;
-    let countBochecha = 0;
-
-    for (let y = Math.floor(tamanho * 0.28); y < Math.floor(tamanho * 0.65); y++) {
-      for (let x = Math.floor(tamanho * 0.32); x < Math.floor(tamanho * 0.68); x++) {
-        const lum = brilhoMatriz[y * tamanho + x];
-        if (y < tamanho * 0.38) {
-          brilhoTesta += lum;
-          countTesta++;
-        } else if (y < tamanho * 0.49) {
-          if (x < tamanho * 0.48) {
-            brilhoOlhosEsq += lum;
-            countOlhosEsq++;
-          } else if (x > tamanho * 0.52) {
-            brilhoOlhosDir += lum;
-            countOlhosDir++;
+        if (normX * normX + normY * normY <= 0.85) {
+          if (y < cy) {
+            contrasteSup += lap;
+            countSup++;
+          } else {
+            contrasteInf += lap;
+            countInf++;
           }
-        } else {
-          brilhoBochecha += lum;
-          countBochecha++;
         }
       }
     }
 
-    const medTesta = brilhoTesta / Math.max(1, countTesta);
-    const medOlhoEsq = brilhoOlhosEsq / Math.max(1, countOlhosEsq);
-    const medOlhoDir = brilhoOlhosDir / Math.max(1, countOlhosDir);
-    const medBochecha = brilhoBochecha / Math.max(1, countBochecha);
-
-    const simetriaOlhos = Math.abs(medOlhoEsq - medOlhoDir) < 22;
-    const contrasteOcular =
-      medTesta - (medOlhoEsq + medOlhoDir) / 2 > 6 ||
-      medBochecha - (medOlhoEsq + medOlhoDir) / 2 > 6;
-    const rostoBiometricoValido = simetriaOlhos && contrasteOcular;
+    const nitidezSup = contrasteSup / Math.max(1, countSup);
+    const nitidezInf = contrasteInf / Math.max(1, countInf);
+    const nitidezMedia = (nitidezSup + nitidezInf) / 2;
 
     let enquadramentoOk = false;
-    let motivoEnquadramento = 'Centralize seu rosto dentro da guia oval.';
+    let motivoEnquadramento = 'Preencha melhor a moldura oval com o seu rosto.';
 
+    // 3A. Detecção nativa de rosto (Chrome/Android) com exigência real de preenchimento
     if (typeof window !== 'undefined' && 'FaceDetector' in window) {
       try {
         // @ts-ignore
@@ -281,64 +238,60 @@ export default function VilaMarketApp() {
 
         if (!rostos || rostos.length === 0) {
           enquadramentoOk = false;
-          motivoEnquadramento = 'Nenhum rosto detectado. Centralize seu rosto na guia oval.';
+          motivoEnquadramento = 'Nenhum rosto detectado. Centralize o rosto na guia oval.';
         } else if (rostos.length > 1) {
           enquadramentoOk = false;
-          motivoEnquadramento = 'Mais de um rosto na tela. Tire a foto sozinho(a).';
+          motivoEnquadramento = 'Mais de um rosto na câmera. Tire a foto sozinho(a).';
         } else {
           const box = rostos[0].boundingBox;
           const boxCx = box.x + box.width / 2;
           const boxCy = box.y + box.height / 2;
           const propLargura = box.width / tamanho;
+          const propAltura = box.height / tamanho;
 
-          if (propLargura < 0.25) {
+          if (propLargura < 0.34 || propAltura < 0.38) {
             enquadramentoOk = false;
-            motivoEnquadramento = 'Rosto muito longe. Aproxime um pouco o celular.';
-          } else if (propLargura > 0.68) {
+            motivoEnquadramento = 'Rosto pequeno/longe. Aproxime o celular para preencher o oval.';
+          } else if (propLargura > 0.66 || propAltura > 0.74) {
             enquadramentoOk = false;
-            motivoEnquadramento = 'Rosto muito perto da câmera. Afaste um pouco o celular.';
-          } else if (
-            Math.abs(boxCx - cx) > tamanho * 0.14 ||
-            Math.abs(boxCy - cy) > tamanho * 0.16
-          ) {
+            motivoEnquadramento = 'Rosto muito perto. Afaste um pouco o celular.';
+          } else if (Math.abs(boxCx - cx) > tamanho * 0.11) {
             enquadramentoOk = false;
-            motivoEnquadramento = 'Rosto deslocado! Centralize a cabeça na linha pontilhada.';
+            motivoEnquadramento = 'Centralize o rosto horizontalmente na guia oval.';
+          } else if (boxCy > cy + tamanho * 0.08) {
+            enquadramentoOk = false;
+            motivoEnquadramento = 'Rosto muito baixo! Suba um pouco o celular para preencher o topo.';
+          } else if (boxCy < cy - tamanho * 0.09) {
+            enquadramentoOk = false;
+            motivoEnquadramento = 'Rosto muito alto! Abaixe um pouco o celular.';
           } else {
             enquadramentoOk = true;
           }
         }
       } catch {
-        enquadramentoOk =
-          rostoBiometricoValido &&
-          nitidezCentro >= 6.8 &&
-          nitidezCentro >= nitidezEsq * 0.85 &&
-          nitidezCentro >= nitidezDir * 0.85;
+        enquadramentoOk = validarFallbackOcular(brilhoMatriz, tamanho, nitidezSup, nitidezInf);
       }
     } else {
-      enquadramentoOk =
-        rostoBiometricoValido &&
-        nitidezCentro >= 6.8 &&
-        nitidezCentro >= nitidezEsq * 0.85 &&
-        nitidezCentro >= nitidezDir * 0.85;
+      enquadramentoOk = validarFallbackOcular(brilhoMatriz, tamanho, nitidezSup, nitidezInf);
     }
 
     if (!enquadramentoOk) {
       return {
         aprovada: false,
         luzOk: true,
-        detalhesOk: nitidezCentro >= 6.5,
+        detalhesOk: nitidezMedia >= 6.5,
         enquadramentoOk: false,
         mensagem: motivoEnquadramento,
       };
     }
 
-    if (nitidezCentro < 6.5) {
+    if (nitidezMedia < 6.5) {
       return {
         aprovada: false,
         luzOk: true,
         detalhesOk: false,
         enquadramentoOk: true,
-        mensagem: 'Poucos detalhes nítidos (foto borrada ou parede). Mantenha o celular firme.',
+        mensagem: 'Poucos detalhes nítidos (foto borrada). Mantenha o celular firme.',
       };
     }
 
@@ -349,6 +302,55 @@ export default function VilaMarketApp() {
       enquadramentoOk: true,
       mensagem: '✅ Rosto enquadrado e iluminação ótima! Pode capturar.',
     };
+  }
+
+  function validarFallbackOcular(
+    brilhoMatriz: Float32Array,
+    tamanho: number,
+    nitidezSup: number,
+    nitidezInf: number
+  ): boolean {
+    // Exige detalhes equilibrados tanto na metade superior (olhos/testa) quanto na inferior (nariz/boca)
+    if (nitidezSup < 6.2 || nitidezInf < 6.2) return false;
+
+    // Faixa estreita onde os olhos DEVEM estar quando o rosto preenche o oval (36% a 50% da altura)
+    let brilhoTesta = 0, cTesta = 0;
+    let brilhoOlhoEsq = 0, cEsq = 0;
+    let brilhoOlhoDir = 0, cDir = 0;
+    let brilhoNarizBochecha = 0, cBaixo = 0;
+
+    for (let y = Math.floor(tamanho * 0.25); y < Math.floor(tamanho * 0.62); y++) {
+      for (let x = Math.floor(tamanho * 0.34); x < Math.floor(tamanho * 0.66); x++) {
+        const lum = brilhoMatriz[y * tamanho + x];
+        if (y < tamanho * 0.36) {
+          brilhoTesta += lum;
+          cTesta++;
+        } else if (y <= tamanho * 0.50) {
+          if (x < tamanho * 0.48) {
+            brilhoOlhoEsq += lum;
+            cEsq++;
+          } else if (x > tamanho * 0.52) {
+            brilhoOlhoDir += lum;
+            cDir++;
+          }
+        } else {
+          brilhoNarizBochecha += lum;
+          cBaixo++;
+        }
+      }
+    }
+
+    const medTesta = brilhoTesta / Math.max(1, cTesta);
+    const medEsq = brilhoOlhoEsq / Math.max(1, cEsq);
+    const medDir = brilhoOlhoDir / Math.max(1, cDir);
+    const medBaixo = brilhoNarizBochecha / Math.max(1, cBaixo);
+    const medOlhos = (medEsq + medDir) / 2;
+
+    const simetriaHorizontal = Math.abs(medEsq - medDir) < 20;
+    const olhosMaisEscurosQueTestaEBochecha =
+      medTesta - medOlhos > 7 && medBaixo - medOlhos > 7;
+
+    return simetriaHorizontal && olhosMaisEscurosQueTestaEBochecha;
   }
 
   function iniciarMonitoramentoQualidade() {
