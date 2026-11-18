@@ -108,7 +108,7 @@ export default function VilaMarketApp() {
   // =========================================================================
   // MOTOR DE ANÁLISE BIOMÉTRICA REAL (ENQUADRAMENTO OVAL + LUZ + DETALHES)
   // =========================================================================
-  async function analisarFrameDeVideo(video: HTMLVideoElement): Promise<StatusQualidadeFoto> {
+ async function analisarFrameDeVideo(video: HTMLVideoElement): Promise<StatusQualidadeFoto> {
     if (!video || video.videoWidth === 0 || video.videoHeight === 0) {
       return {
         aprovada: false,
@@ -142,8 +142,9 @@ export default function VilaMarketApp() {
 
     const imgData = ctx.getImageData(0, 0, tamanho, tamanho).data;
     const brilhoMatriz = new Float32Array(tamanho * tamanho);
+    const peleMatriz = new Uint8Array(tamanho * tamanho);
 
-    // Guia oval visual na tela (centro 50%, raios 26% x 35%)
+    // Guia oval visual na tela (centro 50%, raios 26% x 35% -> topo em y=15%, base em y=85%)
     const cx = tamanho * 0.5;
     const cy = tamanho * 0.5;
     const rx = tamanho * 0.26;
@@ -152,17 +153,16 @@ export default function VilaMarketApp() {
     let somaBrilhoOval = 0;
     let pixelsDentroOval = 0;
 
-    // Contadores de pele facial dentro da metade superior e inferior do oval
-    let peleOvalSup = 0;
-    let totalOvalSup = 0;
-    let peleOvalInf = 0;
-    let totalOvalInf = 0;
-    let peleForaOval = 0;
-    let totalForaOval = 0;
+    // Faixas verticais dentro do eixo central do rosto (x entre 36% e 64%)
+    let peleFaixaTopoTesta = 0, totalFaixaTopoTesta = 0; // y: 20% a 34% (testa alta)
+    let peleFaixaOlhos = 0, totalFaixaOlhos = 0;         // y: 36% a 50% (olhos/nariz)
+    let peleFaixaBocaQueixo = 0, totalFaixaBocaQueixo = 0; // y: 54% a 74% (boca/queixo)
+    let peleAbaixoQueixo = 0, totalAbaixoQueixo = 0;     // y: 80% a 90% (onde deve ser camisa/pescoço, não boca)
+    let peleForaOval = 0, totalForaOval = 0;
 
     let somaX = 0;
     let somaY = 0;
-    let totalPeleQuadro = 0;
+    let totalPeleRosto = 0;
 
     for (let y = 0; y < tamanho; y++) {
       for (let x = 0; x < tamanho; x++) {
@@ -174,20 +174,21 @@ export default function VilaMarketApp() {
         const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
         brilhoMatriz[y * tamanho + x] = lum;
 
-        // Detecção de tonalidade de pele (YCbCr + regras RGB para evitar parede bege/madeira)
+        // Detecção restrita de pele facial (evita camisa azul, parede bege e madeira)
         const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
         const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
         const ehPele =
-          r > 65 &&
-          g > 35 &&
-          b > 20 &&
-          r > g &&
-          r > b &&
-          Math.abs(r - g) > 10 &&
-          cr >= 134 &&
-          cr <= 176 &&
-          cb >= 78 &&
-          cb <= 126;
+          r > 70 &&
+          g > 40 &&
+          b > 25 &&
+          r > g + 8 &&
+          r > b + 15 &&
+          cr >= 136 &&
+          cr <= 174 &&
+          cb >= 80 &&
+          cb <= 124;
+
+        peleMatriz[y * tamanho + x] = ehPele ? 1 : 0;
 
         const normX = (x - cx) / rx;
         const normY = (y - cy) / ry;
@@ -196,24 +197,33 @@ export default function VilaMarketApp() {
         if (distOval <= 1.0) {
           somaBrilhoOval += lum;
           pixelsDentroOval++;
-
-          if (y < cy) {
-            totalOvalSup++;
-            if (ehPele) peleOvalSup++;
-          } else {
-            totalOvalInf++;
-            if (ehPele) peleOvalInf++;
-          }
         } else {
           totalForaOval++;
           if (ehPele) peleForaOval++;
         }
 
-        // Ignora a faixa do pescoço/camiseta bem embaixo (y > 85%) para achar o centro do rosto
-        if (ehPele && y < tamanho * 0.85) {
+        // Análise em faixas horizontais no miolo do oval (x: 36% a 64%)
+        if (x >= tamanho * 0.36 && x <= tamanho * 0.64) {
+          if (y >= tamanho * 0.20 && y < tamanho * 0.34) {
+            totalFaixaTopoTesta++;
+            if (ehPele) peleFaixaTopoTesta++;
+          } else if (y >= tamanho * 0.36 && y < tamanho * 0.50) {
+            totalFaixaOlhos++;
+            if (ehPele) peleFaixaOlhos++;
+          } else if (y >= tamanho * 0.54 && y <= tamanho * 0.74) {
+            totalFaixaBocaQueixo++;
+            if (ehPele) peleFaixaBocaQueixo++;
+          } else if (y >= tamanho * 0.80 && y <= tamanho * 0.90) {
+            totalAbaixoQueixo++;
+            if (ehPele) peleAbaixoQueixo++;
+          }
+        }
+
+        // Centro de gravidade apenas na área do oval expandido (y entre 15% e 80%)
+        if (ehPele && y >= tamanho * 0.15 && y <= tamanho * 0.80 && x >= tamanho * 0.22 && x <= tamanho * 0.78) {
           somaX += x;
           somaY += y;
-          totalPeleQuadro++;
+          totalPeleRosto++;
         }
       }
     }
@@ -240,14 +250,14 @@ export default function VilaMarketApp() {
       };
     }
 
-    // 2. Nitidez (Laplaciano) dentro do oval
+    // 2. Nitidez (Laplaciano) na região central dos olhos/nariz
     let contrasteOval = 0;
     let countContraste = 0;
     for (let y = 2; y < tamanho - 2; y++) {
       for (let x = 2; x < tamanho - 2; x++) {
         const normX = (x - cx) / rx;
         const normY = (y - cy) / ry;
-        if (normX * normX + normY * normY <= 0.85) {
+        if (normX * normX + normY * normY <= 0.75) {
           const pos = y * tamanho + x;
           const lap = Math.abs(
             4 * brilhoMatriz[pos] -
@@ -263,33 +273,56 @@ export default function VilaMarketApp() {
     }
     const nitidezMedia = contrasteOval / Math.max(1, countContraste);
 
-    // 3. Checagem rigorosa de preenchimento do oval
-    const taxaSup = peleOvalSup / Math.max(1, totalOvalSup);
-    const taxaInf = peleOvalInf / Math.max(1, totalOvalInf);
-    const taxaTotalOval = (peleOvalSup + peleOvalInf) / Math.max(1, totalOvalSup + totalOvalInf);
+    // 3. Procura a linha exata dos olhos (faixa horizontal mais escura entre pele da testa e bochecha)
+    let melhorLinhaOlhos = -1;
+    let maiorContrasteOcular = 0;
+    for (let y = Math.floor(tamanho * 0.32); y <= Math.floor(tamanho * 0.62); y++) {
+      let lumAcima = 0, lumLinha = 0, lumAbaixo = 0, count = 0;
+      for (let x = Math.floor(tamanho * 0.36); x <= Math.floor(tamanho * 0.64); x++) {
+        lumAcima += brilhoMatriz[(y - 8) * tamanho + x];
+        lumLinha += brilhoMatriz[y * tamanho + x];
+        lumAbaixo += brilhoMatriz[(y + 8) * tamanho + x];
+        count++;
+      }
+      const mediaAcima = lumAcima / count;
+      const mediaLinha = lumLinha / count;
+      const mediaAbaixo = lumAbaixo / count;
+      const valeEscuro = Math.min(mediaAcima - mediaLinha, mediaAbaixo - mediaLinha);
+      if (valeEscuro > maiorContrasteOcular) {
+        maiorContrasteOcular = valeEscuro;
+        melhorLinhaOlhos = y;
+      }
+    }
+
+    const taxaTopoTesta = peleFaixaTopoTesta / Math.max(1, totalFaixaTopoTesta);
+    const taxaOlhos = peleFaixaOlhos / Math.max(1, totalFaixaOlhos);
+    const taxaBocaQueixo = peleFaixaBocaQueixo / Math.max(1, totalFaixaBocaQueixo);
+    const taxaAbaixoQueixo = peleAbaixoQueixo / Math.max(1, totalAbaixoQueixo);
     const taxaFora = peleForaOval / Math.max(1, totalForaOval);
 
-    const centroRostoX = totalPeleQuadro > 0 ? somaX / totalPeleQuadro : 0;
-    const centroRostoY = totalPeleQuadro > 0 ? somaY / totalPeleQuadro : 0;
+    const centroX = totalPeleRosto > 0 ? somaX / totalPeleRosto : 0;
+    const linhaOlhosNorm = melhorLinhaOlhos / tamanho;
 
     let enquadramentoOk = false;
     let motivo = 'Posicione o rosto dentro da moldura oval.';
 
-    if (totalPeleQuadro < tamanho * tamanho * 0.05 || taxaTotalOval < 0.34) {
-      motivo = 'Rosto longe ou fora da guia. Aproxime e preencha a moldura oval.';
-    } else if (taxaSup < 0.24) {
-      // Bloqueia rosto muito baixo (parede/quadro na parte superior do oval)
-      motivo = 'Rosto muito baixo! Suba o celular para preencher a parte de cima do oval.';
-    } else if (taxaInf < 0.32) {
-      motivo = 'Rosto muito alto! Abaixe um pouco o celular para enquadrar o queixo.';
-    } else if (taxaFora > 0.26 || taxaTotalOval > 0.86) {
-      motivo = 'Rosto muito perto ou vazando da moldura. Afaste um pouco o celular.';
-    } else if (Math.abs(centroRostoX - cx) > tamanho * 0.11) {
-      motivo = 'Centralize o rosto horizontalmente dentro da linha pontilhada.';
-    } else if (centroRostoY > cy + tamanho * 0.09) {
-      motivo = 'Rosto deslocado para baixo. Alinhe os olhos no meio da moldura.';
-    } else if (centroRostoY < cy - tamanho * 0.10) {
-      motivo = 'Rosto deslocado para cima. Abaixe um pouco o celular.';
+    if (totalPeleRosto < tamanho * tamanho * 0.06) {
+      motivo = 'Nenhum rosto centralizado. Olhe de frente para a câmera.';
+    } else if (taxaTopoTesta < 0.38) {
+      // Na image_fef6c8.jpg o cabelo começa só em ~30%, deixando y=20..34% sem testa -> bloqueia!
+      motivo = 'Rosto muito baixo! Suba o celular para preencher a parte superior do oval.';
+    } else if (melhorLinhaOlhos !== -1 && maiorContrasteOcular > 6 && linhaOlhosNorm > 0.51) {
+      // Olhos abaixo da metade do oval -> bloqueia!
+      motivo = 'Alinhe os olhos mais para o meio da moldura oval (suba um pouco o celular).';
+    } else if (melhorLinhaOlhos !== -1 && maiorContrasteOcular > 6 && linhaOlhosNorm < 0.36) {
+      motivo = 'Rosto muito alto! Abaixe um pouco o celular.';
+    } else if (taxaOlhos < 0.45 || taxaBocaQueixo < 0.45) {
+      motivo = 'Centralize o rosto inteiro dentro da guia pontilhada.';
+    } else if (taxaFora > 0.22 || taxaAbaixoQueixo > 0.48) {
+      // Queixo vazando na borda inferior (como na image_fef6c8.jpg) -> bloqueia!
+      motivo = 'Rosto muito perto ou queixo cortado embaixo. Afaste um pouco o celular.';
+    } else if (Math.abs(centroX - cx) > tamanho * 0.09) {
+      motivo = 'Centralize o rosto horizontalmente na guia oval.';
     } else {
       enquadramentoOk = true;
     }
