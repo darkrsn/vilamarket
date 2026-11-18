@@ -564,28 +564,39 @@ useEffect(() => {
   }
 
   async function carregarDadosDashboard() {
-    if (!usuarioLogado?.perfil_id) return;
+    const idAlvo = usuarioLogado?.perfil_id;
+    if (!idAlvo) return;
 
-    if (usuarioLogado?.selfie_url && !selfieTemporariaUrl) {
+    // 1. Se já veio o caminho da selfie no login, busca imediatamente
+    if (usuarioLogado?.selfie_url) {
       gerarUrlTemporariaSelfie(usuarioLogado.selfie_url).then((url) => {
-        if (url) setSelfieTemporariaUrl(url);
+        // Só aplica se o usuário logado ainda for o mesmo!
+        if (url && usuarioLogado?.perfil_id === idAlvo) {
+          setSelfieTemporariaUrl(url);
+        }
       });
+    } else {
+      setSelfieTemporariaUrl(null);
     }
 
+    // 2. Busca os dados atualizados direto do banco
     const [resPerfil, resDeps] = await Promise.all([
       supabase
         .from('perfis')
         .select(
           'id, condominio_id, unidade_id, complemento_apto, unidade_formatada, nome_completo, cpf, data_nascimento, whatsapp, role, selfie_url, status_facial, status_cadastro, saldo_cashback, saldo_pre_pago'
         )
-        .eq('id', usuarioLogado.perfil_id)
+        .eq('id', idAlvo)
         .single(),
       supabase
         .from('perfis')
         .select('id, nome_completo, cpf, role, selfie_url, status_facial, status_cadastro, saldo_pre_pago, criado_em')
-        .eq('titular_id', usuarioLogado.perfil_id)
+        .eq('titular_id', idAlvo)
         .order('criado_em', { ascending: true }),
     ]);
+
+    // Garante que não houve troca de conta durante a consulta ao banco
+    if (usuarioLogado?.perfil_id !== idAlvo) return;
 
     const perfil = resPerfil.data;
     if (perfil) {
@@ -595,7 +606,9 @@ useEffect(() => {
 
       if (perfil.selfie_url) {
         const urlSegura = await gerarUrlTemporariaSelfie(perfil.selfie_url);
-        if (urlSegura) setSelfieTemporariaUrl(urlSegura);
+        if (urlSegura && usuarioLogado?.perfil_id === idAlvo) {
+          setSelfieTemporariaUrl(urlSegura);
+        }
       } else {
         setSelfieTemporariaUrl(null);
       }
@@ -1903,12 +1916,13 @@ useEffect(() => {
                         className="shrink-0 group focus:outline-none"
                       >
                         {selfieTemporariaUrl ? (
-                          <img
-                            src={selfieTemporariaUrl}
-                            alt="Sua selfie"
-                            className="w-16 h-16 rounded-full object-cover border-2 border-emerald-600 shadow-md group-hover:scale-105 transition"
-                          />
-                        ) : (
+  <img
+    key={usuarioLogado.perfil_id}
+    src={selfieTemporariaUrl}
+    alt="Sua selfie"
+    className="w-16 h-16 rounded-full object-cover border-2 border-emerald-600 shadow-md group-hover:scale-105 transition"
+  />
+) : (
                           <div className="w-16 h-16 rounded-full bg-emerald-100 border-2 border-emerald-600 flex items-center justify-center">
                             <span className="w-5 h-5 border-2 border-emerald-700 border-t-transparent rounded-full animate-spin" />
                           </div>
@@ -2327,12 +2341,13 @@ useEffect(() => {
                       title="Toque na foto para ampliar ou atualizar"
                     >
                       {temSelfie && selfieTemporariaUrl ? (
-                        <img
-                          src={selfieTemporariaUrl}
-                          alt="Selfie do perfil"
-                          className="w-16 h-16 rounded-full object-cover border-2 border-floresta shadow-sm group-hover:opacity-90 transition"
-                        />
-                      ) : (
+  <img
+    key={usuarioLogado.perfil_id}
+    src={selfieTemporariaUrl}
+    alt="Selfie do perfil"
+    className="w-16 h-16 rounded-full object-cover border-2 border-floresta shadow-sm group-hover:opacity-90 transition"
+  />
+) : (
                         <div className="w-16 h-16 rounded-full bg-amber-100 border-2 border-amber-400 flex items-center justify-center text-2xl">
                           📷
                         </div>
@@ -2416,11 +2431,16 @@ useEffect(() => {
                   <button
                     type="button"
                     onClick={() => {
-                      limparSessaoDoNavegador();
-                      setUsuarioLogado(null);
-                      setPin('');
-                      setAba('login');
-                    }}
+  limparSessaoDoNavegador();
+  try { sessionStorage.clear(); } catch {}
+  setUsuarioLogado(null);
+  setPerfilDetalhes(null);
+  setSelfieTemporariaUrl(null);
+  setDependentesLista([]);
+  setDependentesSelfiesMap({});
+  setPin('');
+  setAba('login');
+}}
                     className="w-full py-3 text-xs font-bold text-gray-700 border border-gray-300 rounded-xl hover:bg-gray-50"
                   >
                     Sair da Conta
@@ -3064,16 +3084,17 @@ useEffect(() => {
                   porta:
                 </p>
                 {selfieTemporariaUrl ? (
-                  <img
-                    src={selfieTemporariaUrl}
-                    alt="Selfie ampliada"
-                    className="w-64 h-64 mx-auto object-cover rounded-2xl border-2 border-emerald-600 shadow-md"
-                  />
-                ) : (
-                  <div className="w-64 h-64 mx-auto flex items-center justify-center bg-gray-100 rounded-2xl text-xs text-gray-500">
-                    Carregando imagem segura...
-                  </div>
-                )}
+  <img
+    key={usuarioLogado.perfil_id}
+    src={selfieTemporariaUrl}
+    alt="Selfie ampliada"
+    className="w-64 h-64 mx-auto object-cover rounded-2xl border-2 border-emerald-600 shadow-md"
+  />
+) : (
+  <div className="w-64 h-64 mx-auto flex items-center justify-center bg-gray-100 rounded-2xl text-xs text-gray-500">
+    Carregando imagem segura...
+  </div>
+)}
                 <button
                   type="button"
                   onClick={iniciarCameraSelfie}
