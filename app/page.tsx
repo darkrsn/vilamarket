@@ -464,6 +464,8 @@ export default function VilaMarketApp() {
   }
 
   async function carregarDadosDashboard() {
+    if (!usuarioLogado?.perfil_id) return;
+
     const { data: perfil } = await supabase
       .from('perfis')
       .select('*')
@@ -475,7 +477,9 @@ export default function VilaMarketApp() {
 
       if (perfil.selfie_url) {
         const urlSegura = await gerarUrlTemporariaSelfie(perfil.selfie_url);
-        setSelfieTemporariaUrl(urlSegura);
+        if (urlSegura) {
+          setSelfieTemporariaUrl(urlSegura);
+        }
       } else {
         setSelfieTemporariaUrl(null);
       }
@@ -487,6 +491,12 @@ export default function VilaMarketApp() {
           .eq('titular_id', perfil.id)
           .order('criado_em', { ascending: true });
         setDependentesLista(deps || []);
+      }
+    } else if (usuarioLogado?.selfie_url) {
+      // Fallback caso o RLS impeça o select direto, usa o caminho salvo na sessão
+      const urlSegura = await gerarUrlTemporariaSelfie(usuarioLogado.selfie_url);
+      if (urlSegura) {
+        setSelfieTemporariaUrl(urlSegura);
       }
     }
   }
@@ -1396,16 +1406,16 @@ export default function VilaMarketApp() {
                         className="flex flex-col items-center shrink-0 group"
                       >
                         {selfieTemporariaUrl ? (
-                          <img
-                            src={selfieTemporariaUrl}
-                            alt="Miniatura da selfie"
-                            className="w-14 h-14 rounded-full object-cover border-2 border-emerald-600 shadow-sm group-hover:scale-105 transition"
-                          />
-                        ) : (
-                          <div className="w-14 h-14 rounded-full bg-emerald-100 border-2 border-emerald-600 flex items-center justify-center text-lg">
-                            👤
-                          </div>
-                        )}
+  <img
+    src={selfieTemporariaUrl}
+    alt="Sua selfie"
+    className="w-16 h-16 rounded-full object-cover border-2 border-emerald-600 shadow-md"
+  />
+) : (
+  <div className="w-16 h-16 rounded-full bg-emerald-100 border-2 border-emerald-600 flex items-center justify-center">
+    <span className="w-5 h-5 border-2 border-emerald-700 border-t-transparent rounded-full animate-spin" />
+  </div>
+)}
                         <span className="text-[10px] text-emerald-800 font-semibold mt-1">
                           Ampliar
                         </span>
