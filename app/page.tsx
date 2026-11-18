@@ -104,7 +104,7 @@ export default function VilaMarketApp() {
   }, [aba, usuarioLogado]);
 
   // =========================================================================
-  // MOTOR DE ANÁLISE BIOMÉTRICA (ENQUADRAMENTO, LUMINOSIDADE E DETALHES)
+  // MOTOR DE ANÁLISE BIOMÉTRICA REAL (ENQUADRAMENTO OVAL + LUZ + DETALHES)
   // =========================================================================
   async function analisarFrameDeVideo(video: HTMLVideoElement): Promise<StatusQualidadeFoto> {
     if (!video || video.videoWidth === 0 || video.videoHeight === 0) {
@@ -139,136 +139,194 @@ export default function VilaMarketApp() {
     ctx.drawImage(video, sx, sy, menorLado, menorLado, 0, 0, tamanho, tamanho);
 
     const imgData = ctx.getImageData(0, 0, tamanho, tamanho).data;
-
-    // 1. Análise de Luminosidade e Detalhes/Nitidez na região oval central (onde fica o rosto)
-    let somaBrilho = 0;
-    let somaContrasteBordas = 0;
-    let totalPixelsCentro = 0;
-
-    // Janela central (25% a 75% de largura e 18% a 82% de altura)
-    const xMin = Math.floor(tamanho * 0.25);
-    const xMax = Math.floor(tamanho * 0.75);
-    const yMin = Math.floor(tamanho * 0.18);
-    const yMax = Math.floor(tamanho * 0.82);
-
     const brilhoMatriz = new Float32Array(tamanho * tamanho);
+
+    // Geometria exata da elipse (guia oval central onde o rosto deve ficar)
+    const cx = tamanho / 2;
+    const cy = tamanho / 2;
+    const rx = tamanho * 0.25; // raio horizontal do oval (~50% da largura)
+    const ry = tamanho * 0.34; // raio vertical do oval (~68% da altura)
+
+    let somaBrilhoOval = 0;
+    let pixelsDentroOval = 0;
+    let pixelsPeleDentroOval = 0;
+
+    // Centro de massa dos pixels de pele em todo o quadro para detectar deslocamento
+    let totalPixelsPeleQuadro = 0;
+    let somaXPele = 0;
+    let somaYPele = 0;
 
     for (let y = 0; y < tamanho; y++) {
       for (let x = 0; x < tamanho; x++) {
         const idx = (y * tamanho + x) * 4;
+        const r = imgData[idx];
+        const g = imgData[idx + 1];
+        const b = imgData[idx + 2];
+
         // Luminância perceptual (Rec. 709)
-        const lum = 0.2126 * imgData[idx] + 0.7152 * imgData[idx + 1] + 0.0722 * imgData[idx + 2];
+        const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
         brilhoMatriz[y * tamanho + x] = lum;
 
-        if (x >= xMin && x <= xMax && y >= yMin && y <= yMax) {
-          somaBrilho += lum;
-          totalPixelsCentro++;
+        // Detecção robusta de pele humana em espaço YCbCr (funciona para todos os tons de pele)
+        const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+        const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+        const ehPele =
+          r > 45 &&
+          g > 30 &&
+          b > 15 &&
+          r > g &&
+          r > b &&
+          Math.abs(r - g) > 10 &&
+          cb >= 77 &&
+          cb <= 127 &&
+          cr >= 133 &&
+          cr <= 173;
+
+        if (ehPele) {
+          totalPixelsPeleQuadro++;
+          somaXPele += x;
+          somaYPele += y;
         }
-      }
-    }
 
-    // Calcula nitidez/detalhes faciais (gradiente Laplaciano entre pixels vizinhos no centro)
-    for (let y = yMin + 1; y < yMax - 1; y++) {
-      for (let x = xMin + 1; x < xMax - 1; x++) {
-        const pos = y * tamanho + x;
-        const centro = brilhoMatriz[pos];
-        const laplaciano = Math.abs(
-          4 * centro -
-            brilhoMatriz[pos - 1] -
-            brilhoMatriz[pos + 1] -
-            brilhoMatriz[pos - tamanho] -
-            brilhoMatriz[pos + tamanho]
-        );
-        somaContrasteBordas += laplaciano;
-      }
-    }
+        // Verifica se o pixel está dentro da guia oval central
+        const normX = (x - cx) / rx;
+        const normY = (y - cy) / ry;
+        const dentroDoOval = normX * normX + normY * normY <= 1.0;
 
-    const mediaBrilho = somaBrilho / Math.max(1, totalPixelsCentro);
-    const indiceDetalhes = somaContrasteBordas / Math.max(1, totalPixelsCentro);
-
-    // 2. Verificação de Enquadramento Facial (FaceDetector nativo se suportado + proporção)
-    let enquadramentoOk = true;
-    let motivoEnquadramento = '';
-
-    if (typeof window !== 'undefined' && 'FaceDetector' in window) {
-      try {
-        // @ts-ignore - API nativa do Chrome/Android
-        const detector = new window.FaceDetector({ fastMode: true, maxDetectedFaces: 2 });
-        const rostos = await detector.detect(canvas);
-
-        if (!rostos || rostos.length === 0) {
-          enquadramentoOk = false;
-          motivoEnquadramento = 'Nenhum rosto detectado. Centralize seu rosto na moldura oval.';
-        } else if (rostos.length > 1) {
-          enquadramentoOk = false;
-          motivoEnquadramento = 'Mais de um rosto na tela. Tire a foto sozinho(a).';
-        } else {
-          const box = rostos[0].boundingBox;
-          const centroX = box.x + box.width / 2;
-          const centroY = box.y + box.height / 2;
-          const proporcaoLargura = box.width / tamanho;
-
-          if (proporcaoLargura < 0.26) {
-            enquadramentoOk = false;
-            motivoEnquadramento = 'Rosto muito longe. Aproxime o celular do rosto.';
-          } else if (proporcaoLargura > 0.78) {
-            enquadramentoOk = false;
-            motivoEnquadramento = 'Rosto muito perto. Afaste um pouco o celular.';
-          } else if (
-            Math.abs(centroX - tamanho / 2) > tamanho * 0.18 ||
-            Math.abs(centroY - tamanho / 2) > tamanho * 0.2
-          ) {
-            enquadramentoOk = false;
-            motivoEnquadramento = 'Centralize o rosto dentro da guia oval.';
+        if (dentroDoOval) {
+          somaBrilhoOval += lum;
+          pixelsDentroOval++;
+          if (ehPele) {
+            pixelsPeleDentroOval++;
           }
         }
-      } catch {
-        // Se o aparelho não suportar FaceDetector por hardware, segue com análise de luz e detalhes
+      }
+    }
+
+    // Calcula nitidez/detalhes faciais (gradiente Laplaciano dentro da região do oval)
+    let somaContrasteOval = 0;
+    let contagemBordasOval = 0;
+    for (let y = 1; y < tamanho - 1; y++) {
+      for (let x = 1; x < tamanho - 1; x++) {
+        const normX = (x - cx) / rx;
+        const normY = (y - cy) / ry;
+        if (normX * normX + normY * normY <= 0.85) {
+          const pos = y * tamanho + x;
+          const centro = brilhoMatriz[pos];
+          const laplaciano = Math.abs(
+            4 * centro -
+              brilhoMatriz[pos - 1] -
+              brilhoMatriz[pos + 1] -
+              brilhoMatriz[pos - tamanho] -
+              brilhoMatriz[pos + tamanho]
+          );
+          somaContrasteOval += laplaciano;
+          contagemBordasOval++;
+        }
+      }
+    }
+
+    const mediaBrilho = somaBrilhoOval / Math.max(1, pixelsDentroOval);
+    const indiceDetalhes = somaContrasteOval / Math.max(1, contagemBordasOval);
+    const taxaPreenchimentoRosto = pixelsPeleDentroOval / Math.max(1, pixelsDentroOval);
+
+    // 1. Checagem de Luz
+    const luzOk = mediaBrilho >= 60 && mediaBrilho <= 235;
+    if (mediaBrilho < 60) {
+      return {
+        aprovada: false,
+        luzOk: false,
+        detalhesOk: false,
+        enquadramentoOk: false,
+        mensagem: 'Pouca luz! Vá para um local mais iluminado ou vire-se para a luz.',
+      };
+    }
+    if (mediaBrilho > 235) {
+      return {
+        aprovada: false,
+        luzOk: false,
+        detalhesOk: false,
+        enquadramentoOk: false,
+        mensagem: 'Excesso de luz (contra janela/lâmpada). Evite luz forte atrás de você.',
+      };
+    }
+
+    // 2. Checagem de Enquadramento Real (Rosto centralizado dentro da moldura oval)
+    let enquadramentoOk = false;
+    let motivoEnquadramento = 'Centralize todo o seu rosto dentro da moldura oval.';
+
+    if (totalPixelsPeleQuadro < tamanho * tamanho * 0.06 || taxaPreenchimentoRosto < 0.36) {
+      enquadramentoOk = false;
+      motivoEnquadramento =
+        taxaPreenchimentoRosto > 0.12
+          ? 'Rosto fora de centro ou muito longe. Encaixe o rosto na guia oval.'
+          : 'Nenhum rosto enquadrado na guia oval. Posicione seu rosto no centro.';
+    } else {
+      const centroMassaX = somaXPele / totalPixelsPeleQuadro;
+      const centroMassaY = somaYPele / totalPixelsPeleQuadro;
+      const desvioX = Math.abs(centroMassaX - cx) / tamanho;
+      const desvioY = Math.abs(centroMassaY - cy) / tamanho;
+
+      // Verifica se o rosto não está deslocado para as bordas (como no teste anterior)
+      if (desvioX > 0.11 || desvioY > 0.14) {
+        enquadramentoOk = false;
+        motivoEnquadramento = 'Rosto deslocado! Centralize a cabeça dentro da linha pontilhada.';
+      } else if (taxaPreenchimentoRosto > 0.88) {
+        enquadramentoOk = false;
+        motivoEnquadramento = 'Rosto muito perto da câmera. Afaste um pouco o celular.';
+      } else {
         enquadramentoOk = true;
       }
     }
 
-    // 3. Regras de Aprovação (Luz + Detalhes mínimos para rejeitar paredes, lente tampada ou fotos borradas)
-    const luzOk = mediaBrilho >= 58 && mediaBrilho <= 235;
-    const detalhesOk = indiceDetalhes >= 6.5;
+    // Checagem complementar via FaceDetector nativo (caso o aparelho suporte)
+    if (enquadramentoOk && typeof window !== 'undefined' && 'FaceDetector' in window) {
+      try {
+        // @ts-ignore
+        const detector = new window.FaceDetector({ fastMode: true, maxDetectedFaces: 2 });
+        const rostos = await detector.detect(canvas);
+        if (rostos && rostos.length > 0) {
+          if (rostos.length > 1) {
+            enquadramentoOk = false;
+            motivoEnquadramento = 'Mais de um rosto na tela. Tire a foto sozinho(a).';
+          } else {
+            const box = rostos[0].boundingBox;
+            const boxCx = box.x + box.width / 2;
+            const boxCy = box.y + box.height / 2;
+            if (
+              Math.abs(boxCx - cx) > tamanho * 0.13 ||
+              Math.abs(boxCy - cy) > tamanho * 0.15 ||
+              box.width / tamanho < 0.30
+            ) {
+              enquadramentoOk = false;
+              motivoEnquadramento = 'Encaixe todo o rosto dentro da guia oval.';
+            }
+          }
+        }
+      } catch {
+        // Segue com a validação geométrica YCbCr já aprovada
+      }
+    }
 
     if (!enquadramentoOk) {
       return {
         aprovada: false,
-        luzOk,
-        detalhesOk,
+        luzOk: true,
+        detalhesOk: indiceDetalhes >= 7.0,
         enquadramentoOk: false,
         mensagem: motivoEnquadramento,
       };
     }
 
-    if (mediaBrilho < 58) {
-      return {
-        aprovada: false,
-        luzOk: false,
-        detalhesOk,
-        enquadramentoOk: true,
-        mensagem: 'Pouca luz! Vá para um ambiente mais iluminado ou vire-se para a luz.',
-      };
-    }
-
-    if (mediaBrilho > 235) {
-      return {
-        aprovada: false,
-        luzOk: false,
-        detalhesOk,
-        enquadramentoOk: true,
-        mensagem: 'Excesso de luz (contra o sol/lâmpada). Evite luz forte atrás de você.',
-      };
-    }
-
+    // 3. Checagem de Nitidez / Detalhes Faciais (rejeita parede lisa, foto tremida ou lente coberta)
+    const detalhesOk = indiceDetalhes >= 7.2;
     if (!detalhesOk) {
       return {
         aprovada: false,
         luzOk: true,
         detalhesOk: false,
         enquadramentoOk: true,
-        mensagem: 'Imagem sem detalhes nítidos (parede ou borrada). Enquadre seu rosto com firmeza.',
+        mensagem: 'Poucos detalhes nítidos (foto borrada). Mantenha o celular firme e limpe a lente.',
       };
     }
 
@@ -288,7 +346,7 @@ export default function VilaMarketApp() {
         const status = await analisarFrameDeVideo(videoRef.current);
         setQualidadeCamera(status);
       }
-    }, 450);
+    }, 350);
   }
 
   function pararAnaliseCamera() {
@@ -645,7 +703,6 @@ export default function VilaMarketApp() {
   async function capturarFrameSelfie(paraDependente = false) {
     if (!videoRef.current) return;
 
-    // Faz uma última checagem rigorosa exatamente no milissegundo do clique
     const checagemFinal = await analisarFrameDeVideo(videoRef.current);
     setQualidadeCamera(checagemFinal);
 
@@ -659,7 +716,6 @@ export default function VilaMarketApp() {
     canvas.height = 400;
     const ctx = canvas.getContext('2d');
     if (ctx) {
-      // Recorta quadrado central proporcional sem esticar o rosto
       const menorLado = Math.min(videoRef.current.videoWidth, videoRef.current.videoHeight);
       const sx = (videoRef.current.videoWidth - menorLado) / 2;
       const sy = (videoRef.current.videoHeight - menorLado) / 2;
