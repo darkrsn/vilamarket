@@ -92,12 +92,14 @@ export default function VilaMarketApp() {
 
   // Restaura o login salvo no navegador ao abrir ou apertar F5
   useEffect(() => {
-    carregarUnidades();
     restaurarSessaoSalva();
     return () => pararAnaliseCamera();
   }, []);
 
   useEffect(() => {
+    if (aba === 'cadastro' && unidades.length === 0) {
+      carregarUnidades();
+    }
     if (aba === 'painel' && usuarioLogado?.perfil_id) {
       carregarDadosDashboard();
     }
@@ -141,28 +143,77 @@ export default function VilaMarketApp() {
     const imgData = ctx.getImageData(0, 0, tamanho, tamanho).data;
     const brilhoMatriz = new Float32Array(tamanho * tamanho);
 
-    const cx = tamanho / 2;
-    const cy = tamanho / 2;
-    const rx = tamanho * 0.25;
-    const ry = tamanho * 0.34;
+    // Guia oval visual na tela (centro 50%, raios 26% x 35%)
+    const cx = tamanho * 0.5;
+    const cy = tamanho * 0.5;
+    const rx = tamanho * 0.26;
+    const ry = tamanho * 0.35;
 
     let somaBrilhoOval = 0;
     let pixelsDentroOval = 0;
 
+    // Contadores de pele facial dentro da metade superior e inferior do oval
+    let peleOvalSup = 0;
+    let totalOvalSup = 0;
+    let peleOvalInf = 0;
+    let totalOvalInf = 0;
+    let peleForaOval = 0;
+    let totalForaOval = 0;
+
+    let somaX = 0;
+    let somaY = 0;
+    let totalPeleQuadro = 0;
+
     for (let y = 0; y < tamanho; y++) {
       for (let x = 0; x < tamanho; x++) {
         const idx = (y * tamanho + x) * 4;
-        const lum =
-          0.2126 * imgData[idx] +
-          0.7152 * imgData[idx + 1] +
-          0.0722 * imgData[idx + 2];
+        const r = imgData[idx];
+        const g = imgData[idx + 1];
+        const b = imgData[idx + 2];
+
+        const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
         brilhoMatriz[y * tamanho + x] = lum;
+
+        // Detecção de tonalidade de pele (YCbCr + regras RGB para evitar parede bege/madeira)
+        const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+        const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+        const ehPele =
+          r > 65 &&
+          g > 35 &&
+          b > 20 &&
+          r > g &&
+          r > b &&
+          Math.abs(r - g) > 10 &&
+          cr >= 134 &&
+          cr <= 176 &&
+          cb >= 78 &&
+          cb <= 126;
 
         const normX = (x - cx) / rx;
         const normY = (y - cy) / ry;
-        if (normX * normX + normY * normY <= 1.0) {
+        const distOval = normX * normX + normY * normY;
+
+        if (distOval <= 1.0) {
           somaBrilhoOval += lum;
           pixelsDentroOval++;
+
+          if (y < cy) {
+            totalOvalSup++;
+            if (ehPele) peleOvalSup++;
+          } else {
+            totalOvalInf++;
+            if (ehPele) peleOvalInf++;
+          }
+        } else {
+          totalForaOval++;
+          if (ehPele) peleForaOval++;
+        }
+
+        // Ignora a faixa do pescoço/camiseta bem embaixo (y > 85%) para achar o centro do rosto
+        if (ehPele && y < tamanho * 0.85) {
+          somaX += x;
+          somaY += y;
+          totalPeleQuadro++;
         }
       }
     }
@@ -189,90 +240,58 @@ export default function VilaMarketApp() {
       };
     }
 
-    // 2. Nitidez (Laplaciano) separada por metade superior e inferior do oval
-    let contrasteSup = 0;
-    let countSup = 0;
-    let contrasteInf = 0;
-    let countInf = 0;
-
+    // 2. Nitidez (Laplaciano) dentro do oval
+    let contrasteOval = 0;
+    let countContraste = 0;
     for (let y = 2; y < tamanho - 2; y++) {
       for (let x = 2; x < tamanho - 2; x++) {
-        const pos = y * tamanho + x;
-        const centro = brilhoMatriz[pos];
-        const lap = Math.abs(
-          4 * centro -
-            brilhoMatriz[pos - 1] -
-            brilhoMatriz[pos + 1] -
-            brilhoMatriz[pos - tamanho] -
-            brilhoMatriz[pos + tamanho]
-        );
-
         const normX = (x - cx) / rx;
         const normY = (y - cy) / ry;
-
         if (normX * normX + normY * normY <= 0.85) {
-          if (y < cy) {
-            contrasteSup += lap;
-            countSup++;
-          } else {
-            contrasteInf += lap;
-            countInf++;
-          }
+          const pos = y * tamanho + x;
+          const lap = Math.abs(
+            4 * brilhoMatriz[pos] -
+              brilhoMatriz[pos - 1] -
+              brilhoMatriz[pos + 1] -
+              brilhoMatriz[pos - tamanho] -
+              brilhoMatriz[pos + tamanho]
+          );
+          contrasteOval += lap;
+          countContraste++;
         }
       }
     }
+    const nitidezMedia = contrasteOval / Math.max(1, countContraste);
 
-    const nitidezSup = contrasteSup / Math.max(1, countSup);
-    const nitidezInf = contrasteInf / Math.max(1, countInf);
-    const nitidezMedia = (nitidezSup + nitidezInf) / 2;
+    // 3. Checagem rigorosa de preenchimento do oval
+    const taxaSup = peleOvalSup / Math.max(1, totalOvalSup);
+    const taxaInf = peleOvalInf / Math.max(1, totalOvalInf);
+    const taxaTotalOval = (peleOvalSup + peleOvalInf) / Math.max(1, totalOvalSup + totalOvalInf);
+    const taxaFora = peleForaOval / Math.max(1, totalForaOval);
+
+    const centroRostoX = totalPeleQuadro > 0 ? somaX / totalPeleQuadro : 0;
+    const centroRostoY = totalPeleQuadro > 0 ? somaY / totalPeleQuadro : 0;
 
     let enquadramentoOk = false;
-    let motivoEnquadramento = 'Preencha melhor a moldura oval com o seu rosto.';
+    let motivo = 'Posicione o rosto dentro da moldura oval.';
 
-    // 3A. Detecção nativa de rosto (Chrome/Android) com exigência real de preenchimento
-    if (typeof window !== 'undefined' && 'FaceDetector' in window) {
-      try {
-        // @ts-ignore
-        const detector = new window.FaceDetector({ fastMode: true, maxDetectedFaces: 2 });
-        const rostos = await detector.detect(canvas);
-
-        if (!rostos || rostos.length === 0) {
-          enquadramentoOk = false;
-          motivoEnquadramento = 'Nenhum rosto detectado. Centralize o rosto na guia oval.';
-        } else if (rostos.length > 1) {
-          enquadramentoOk = false;
-          motivoEnquadramento = 'Mais de um rosto na câmera. Tire a foto sozinho(a).';
-        } else {
-          const box = rostos[0].boundingBox;
-          const boxCx = box.x + box.width / 2;
-          const boxCy = box.y + box.height / 2;
-          const propLargura = box.width / tamanho;
-          const propAltura = box.height / tamanho;
-
-          if (propLargura < 0.34 || propAltura < 0.38) {
-            enquadramentoOk = false;
-            motivoEnquadramento = 'Rosto pequeno/longe. Aproxime o celular para preencher o oval.';
-          } else if (propLargura > 0.66 || propAltura > 0.74) {
-            enquadramentoOk = false;
-            motivoEnquadramento = 'Rosto muito perto. Afaste um pouco o celular.';
-          } else if (Math.abs(boxCx - cx) > tamanho * 0.11) {
-            enquadramentoOk = false;
-            motivoEnquadramento = 'Centralize o rosto horizontalmente na guia oval.';
-          } else if (boxCy > cy + tamanho * 0.08) {
-            enquadramentoOk = false;
-            motivoEnquadramento = 'Rosto muito baixo! Suba um pouco o celular para preencher o topo.';
-          } else if (boxCy < cy - tamanho * 0.09) {
-            enquadramentoOk = false;
-            motivoEnquadramento = 'Rosto muito alto! Abaixe um pouco o celular.';
-          } else {
-            enquadramentoOk = true;
-          }
-        }
-      } catch {
-        enquadramentoOk = validarFallbackOcular(brilhoMatriz, tamanho, nitidezSup, nitidezInf);
-      }
+    if (totalPeleQuadro < tamanho * tamanho * 0.05 || taxaTotalOval < 0.34) {
+      motivo = 'Rosto longe ou fora da guia. Aproxime e preencha a moldura oval.';
+    } else if (taxaSup < 0.24) {
+      // Bloqueia rosto muito baixo (parede/quadro na parte superior do oval)
+      motivo = 'Rosto muito baixo! Suba o celular para preencher a parte de cima do oval.';
+    } else if (taxaInf < 0.32) {
+      motivo = 'Rosto muito alto! Abaixe um pouco o celular para enquadrar o queixo.';
+    } else if (taxaFora > 0.26 || taxaTotalOval > 0.86) {
+      motivo = 'Rosto muito perto ou vazando da moldura. Afaste um pouco o celular.';
+    } else if (Math.abs(centroRostoX - cx) > tamanho * 0.11) {
+      motivo = 'Centralize o rosto horizontalmente dentro da linha pontilhada.';
+    } else if (centroRostoY > cy + tamanho * 0.09) {
+      motivo = 'Rosto deslocado para baixo. Alinhe os olhos no meio da moldura.';
+    } else if (centroRostoY < cy - tamanho * 0.10) {
+      motivo = 'Rosto deslocado para cima. Abaixe um pouco o celular.';
     } else {
-      enquadramentoOk = validarFallbackOcular(brilhoMatriz, tamanho, nitidezSup, nitidezInf);
+      enquadramentoOk = true;
     }
 
     if (!enquadramentoOk) {
@@ -281,7 +300,7 @@ export default function VilaMarketApp() {
         luzOk: true,
         detalhesOk: nitidezMedia >= 6.5,
         enquadramentoOk: false,
-        mensagem: motivoEnquadramento,
+        mensagem: motivo,
       };
     }
 
@@ -291,7 +310,7 @@ export default function VilaMarketApp() {
         luzOk: true,
         detalhesOk: false,
         enquadramentoOk: true,
-        mensagem: 'Poucos detalhes nítidos (foto borrada). Mantenha o celular firme.',
+        mensagem: 'Foto sem nitidez (borrada). Mantenha o celular firme.',
       };
     }
 
@@ -302,55 +321,6 @@ export default function VilaMarketApp() {
       enquadramentoOk: true,
       mensagem: '✅ Rosto enquadrado e iluminação ótima! Pode capturar.',
     };
-  }
-
-  function validarFallbackOcular(
-    brilhoMatriz: Float32Array,
-    tamanho: number,
-    nitidezSup: number,
-    nitidezInf: number
-  ): boolean {
-    // Exige detalhes equilibrados tanto na metade superior (olhos/testa) quanto na inferior (nariz/boca)
-    if (nitidezSup < 6.2 || nitidezInf < 6.2) return false;
-
-    // Faixa estreita onde os olhos DEVEM estar quando o rosto preenche o oval (36% a 50% da altura)
-    let brilhoTesta = 0, cTesta = 0;
-    let brilhoOlhoEsq = 0, cEsq = 0;
-    let brilhoOlhoDir = 0, cDir = 0;
-    let brilhoNarizBochecha = 0, cBaixo = 0;
-
-    for (let y = Math.floor(tamanho * 0.25); y < Math.floor(tamanho * 0.62); y++) {
-      for (let x = Math.floor(tamanho * 0.34); x < Math.floor(tamanho * 0.66); x++) {
-        const lum = brilhoMatriz[y * tamanho + x];
-        if (y < tamanho * 0.36) {
-          brilhoTesta += lum;
-          cTesta++;
-        } else if (y <= tamanho * 0.50) {
-          if (x < tamanho * 0.48) {
-            brilhoOlhoEsq += lum;
-            cEsq++;
-          } else if (x > tamanho * 0.52) {
-            brilhoOlhoDir += lum;
-            cDir++;
-          }
-        } else {
-          brilhoNarizBochecha += lum;
-          cBaixo++;
-        }
-      }
-    }
-
-    const medTesta = brilhoTesta / Math.max(1, cTesta);
-    const medEsq = brilhoOlhoEsq / Math.max(1, cEsq);
-    const medDir = brilhoOlhoDir / Math.max(1, cDir);
-    const medBaixo = brilhoNarizBochecha / Math.max(1, cBaixo);
-    const medOlhos = (medEsq + medDir) / 2;
-
-    const simetriaHorizontal = Math.abs(medEsq - medDir) < 20;
-    const olhosMaisEscurosQueTestaEBochecha =
-      medTesta - medOlhos > 7 && medBaixo - medOlhos > 7;
-
-    return simetriaHorizontal && olhosMaisEscurosQueTestaEBochecha;
   }
 
   function iniciarMonitoramentoQualidade() {
@@ -371,7 +341,7 @@ export default function VilaMarketApp() {
   }
 
   // =========================================================================
-  // FUNÇÕES DE STORAGE PRIVADO E SESSÃO (CONFORMIDADE LGPD)
+  // FUNÇÕES DE STORAGE PRIVADO E SESSÃO (CONFORMIDADE LGPD + CACHE RÁPIDO)
   // =========================================================================
   async function gerarUrlTemporariaSelfie(caminhoOuBase64: string | null): Promise<string | null> {
     if (!caminhoOuBase64) return null;
@@ -380,11 +350,34 @@ export default function VilaMarketApp() {
       return caminhoOuBase64;
     }
 
+    const chaveCache = `vm_selfie_cache_${caminhoOuBase64}`;
+    try {
+      const salvo = sessionStorage.getItem(chaveCache);
+      if (salvo) {
+        const { url, expiraEm } = JSON.parse(salvo);
+        if (url && expiraEm && Date.now() < expiraEm) {
+          return url;
+        }
+      }
+    } catch {
+      // Ignora erro de sessionStorage
+    }
+
     const { data, error } = await supabase.storage
       .from('selfies')
       .createSignedUrl(caminhoOuBase64, 600);
 
-    if (error || !data) return null;
+    if (error || !data?.signedUrl) return null;
+
+    try {
+      sessionStorage.setItem(
+        chaveCache,
+        JSON.stringify({ url: data.signedUrl, expiraEm: Date.now() + 8 * 60 * 1000 })
+      );
+    } catch {
+      // Ignora erro de sessionStorage
+    }
+
     return data.signedUrl;
   }
 
@@ -466,12 +459,28 @@ export default function VilaMarketApp() {
   async function carregarDadosDashboard() {
     if (!usuarioLogado?.perfil_id) return;
 
-    const { data: perfil } = await supabase
-      .from('perfis')
-      .select('*')
-      .eq('id', usuarioLogado.perfil_id)
-      .single();
+    // Dispara carregamento imediato da selfie caso já exista caminho na sessão
+    if (usuarioLogado?.selfie_url && !selfieTemporariaUrl) {
+      gerarUrlTemporariaSelfie(usuarioLogado.selfie_url).then((url) => {
+        if (url) setSelfieTemporariaUrl(url);
+      });
+    }
 
+    // Busca perfil e dependentes em paralelo
+    const [resPerfil, resDeps] = await Promise.all([
+      supabase
+        .from('perfis')
+        .select('id, condominio_id, unidade_id, complemento_apto, unidade_formatada, nome_completo, cpf, role, selfie_url, status_facial, status_cadastro, saldo_cashback, saldo_pre_pago')
+        .eq('id', usuarioLogado.perfil_id)
+        .single(),
+      supabase
+        .from('perfis')
+        .select('id, nome_completo, cpf, role, selfie_url, status_facial, saldo_pre_pago, criado_em')
+        .eq('titular_id', usuarioLogado.perfil_id)
+        .order('criado_em', { ascending: true }),
+    ]);
+
+    const perfil = resPerfil.data;
     if (perfil) {
       setPerfilDetalhes(perfil);
 
@@ -485,15 +494,9 @@ export default function VilaMarketApp() {
       }
 
       if (perfil.role === 'titular' || perfil.role === 'admin') {
-        const { data: deps } = await supabase
-          .from('perfis')
-          .select('*')
-          .eq('titular_id', perfil.id)
-          .order('criado_em', { ascending: true });
-        setDependentesLista(deps || []);
+        setDependentesLista(resDeps.data || []);
       }
     } else if (usuarioLogado?.selfie_url) {
-      // Fallback caso o RLS impeça o select direto, usa o caminho salvo na sessão
       const urlSegura = await gerarUrlTemporariaSelfie(usuarioLogado.selfie_url);
       if (urlSegura) {
         setSelfieTemporariaUrl(urlSegura);
@@ -1406,16 +1409,16 @@ export default function VilaMarketApp() {
                         className="flex flex-col items-center shrink-0 group"
                       >
                         {selfieTemporariaUrl ? (
-  <img
-    src={selfieTemporariaUrl}
-    alt="Sua selfie"
-    className="w-16 h-16 rounded-full object-cover border-2 border-emerald-600 shadow-md"
-  />
-) : (
-  <div className="w-16 h-16 rounded-full bg-emerald-100 border-2 border-emerald-600 flex items-center justify-center">
-    <span className="w-5 h-5 border-2 border-emerald-700 border-t-transparent rounded-full animate-spin" />
-  </div>
-)}
+                          <img
+                            src={selfieTemporariaUrl}
+                            alt="Sua selfie"
+                            className="w-16 h-16 rounded-full object-cover border-2 border-emerald-600 shadow-md"
+                          />
+                        ) : (
+                          <div className="w-16 h-16 rounded-full bg-emerald-100 border-2 border-emerald-600 flex items-center justify-center">
+                            <span className="w-5 h-5 border-2 border-emerald-700 border-t-transparent rounded-full animate-spin" />
+                          </div>
+                        )}
                         <span className="text-[10px] text-emerald-800 font-semibold mt-1">
                           Ampliar
                         </span>
@@ -2014,7 +2017,7 @@ export default function VilaMarketApp() {
                     >
                       {qualidadeCamera.mensagem}
                     </p>
-                    <div className="relative aspect-square max-w-[230px] mx-auto w-full rounded-xl">
+                    <div className="relative aspect-square max-w-[230px] mx-auto w-full rounded-xl overflow-hidden bg-black">
                       <video
                         ref={videoRef}
                         autoPlay
@@ -2024,7 +2027,7 @@ export default function VilaMarketApp() {
                       />
                       <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
                         <div
-                          className={`w-28 h-36 rounded-full border-2 border-dashed ${
+                          className={`w-40 h-52 rounded-full border-4 border-dashed ${
                             qualidadeCamera.aprovada ? 'border-emerald-400' : 'border-amber-400'
                           }`}
                         />
