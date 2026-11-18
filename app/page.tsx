@@ -101,7 +101,7 @@ export default function VilaMarketApp() {
     if (aba === 'painel' && usuarioLogado?.perfil_id) {
       carregarDadosDashboard();
     }
-  }, [aba, usuarioLogado]);
+  }, [aba, usuarioLogado?.perfil_id]);
 
   // =========================================================================
   // MOTOR DE ANÁLISE BIOMÉTRICA REAL (ENQUADRAMENTO OVAL + LUZ + DETALHES)
@@ -132,7 +132,6 @@ export default function VilaMarketApp() {
       };
     }
 
-    // Recorta o quadrado central proporcional ao vídeo para análise
     const menorLado = Math.min(video.videoWidth, video.videoHeight);
     const sx = (video.videoWidth - menorLado) / 2;
     const sy = (video.videoHeight - menorLado) / 2;
@@ -141,17 +140,15 @@ export default function VilaMarketApp() {
     const imgData = ctx.getImageData(0, 0, tamanho, tamanho).data;
     const brilhoMatriz = new Float32Array(tamanho * tamanho);
 
-    // Geometria exata da elipse (guia oval central onde o rosto deve ficar)
     const cx = tamanho / 2;
     const cy = tamanho / 2;
-    const rx = tamanho * 0.25; // raio horizontal do oval (~50% da largura)
-    const ry = tamanho * 0.34; // raio vertical do oval (~68% da altura)
+    const rx = tamanho * 0.25;
+    const ry = tamanho * 0.34;
 
     let somaBrilhoOval = 0;
     let pixelsDentroOval = 0;
     let pixelsPeleDentroOval = 0;
 
-    // Centro de massa dos pixels de pele em todo o quadro para detectar deslocamento
     let totalPixelsPeleQuadro = 0;
     let somaXPele = 0;
     let somaYPele = 0;
@@ -163,11 +160,9 @@ export default function VilaMarketApp() {
         const g = imgData[idx + 1];
         const b = imgData[idx + 2];
 
-        // Luminância perceptual (Rec. 709)
         const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
         brilhoMatriz[y * tamanho + x] = lum;
 
-        // Detecção robusta de pele humana em espaço YCbCr (funciona para todos os tons de pele)
         const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
         const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
         const ehPele =
@@ -188,7 +183,6 @@ export default function VilaMarketApp() {
           somaYPele += y;
         }
 
-        // Verifica se o pixel está dentro da guia oval central
         const normX = (x - cx) / rx;
         const normY = (y - cy) / ry;
         const dentroDoOval = normX * normX + normY * normY <= 1.0;
@@ -203,7 +197,6 @@ export default function VilaMarketApp() {
       }
     }
 
-    // Calcula nitidez/detalhes faciais (gradiente Laplaciano dentro da região do oval)
     let somaContrasteOval = 0;
     let contagemBordasOval = 0;
     for (let y = 1; y < tamanho - 1; y++) {
@@ -230,7 +223,6 @@ export default function VilaMarketApp() {
     const indiceDetalhes = somaContrasteOval / Math.max(1, contagemBordasOval);
     const taxaPreenchimentoRosto = pixelsPeleDentroOval / Math.max(1, pixelsDentroOval);
 
-    // 1. Checagem de Luz
     const luzOk = mediaBrilho >= 60 && mediaBrilho <= 235;
     if (mediaBrilho < 60) {
       return {
@@ -251,7 +243,6 @@ export default function VilaMarketApp() {
       };
     }
 
-    // 2. Checagem de Enquadramento Real (Rosto centralizado dentro da moldura oval)
     let enquadramentoOk = false;
     let motivoEnquadramento = 'Centralize todo o seu rosto dentro da moldura oval.';
 
@@ -267,7 +258,6 @@ export default function VilaMarketApp() {
       const desvioX = Math.abs(centroMassaX - cx) / tamanho;
       const desvioY = Math.abs(centroMassaY - cy) / tamanho;
 
-      // Verifica se o rosto não está deslocado para as bordas (como no teste anterior)
       if (desvioX > 0.11 || desvioY > 0.14) {
         enquadramentoOk = false;
         motivoEnquadramento = 'Rosto deslocado! Centralize a cabeça dentro da linha pontilhada.';
@@ -279,7 +269,6 @@ export default function VilaMarketApp() {
       }
     }
 
-    // Checagem complementar via FaceDetector nativo (caso o aparelho suporte)
     if (enquadramentoOk && typeof window !== 'undefined' && 'FaceDetector' in window) {
       try {
         // @ts-ignore
@@ -304,7 +293,7 @@ export default function VilaMarketApp() {
           }
         }
       } catch {
-        // Segue com a validação geométrica YCbCr já aprovada
+        // Segue com a validação geométrica YCbCr
       }
     }
 
@@ -318,7 +307,6 @@ export default function VilaMarketApp() {
       };
     }
 
-    // 3. Checagem de Nitidez / Detalhes Faciais (rejeita parede lisa, foto tremida ou lente coberta)
     const detalhesOk = indiceDetalhes >= 7.2;
     if (!detalhesOk) {
       return {
@@ -401,7 +389,7 @@ export default function VilaMarketApp() {
       };
       localStorage.setItem(CHAVE_STORAGE, JSON.stringify(sessao));
     } catch {
-      // Ignora erro caso o navegador esteja em modo anônimo restrito
+      // Ignora erro de storage
     }
   }
 
@@ -648,7 +636,7 @@ export default function VilaMarketApp() {
   }
 
   // =========================================================================
-  // FUNÇÕES DA DASHBOARD (SELFIE COM VALIDAÇÃO DE QUALIDADE, PIN, EXTRATO)
+  // FUNÇÕES DA DASHBOARD (SELFIE COM SALVAMENTO GARANTIDO VIA RPC)
   // =========================================================================
   async function iniciarCameraSelfie() {
     setFotoCapturada(null);
@@ -681,10 +669,11 @@ export default function VilaMarketApp() {
     setFotoCapturada(null);
     setModalAtivo('selfie');
 
-    if (perfilDetalhes?.selfie_url) {
+    if (perfilDetalhes?.selfie_url || usuarioLogado?.selfie_url) {
       setModoTrocaSelfie(false);
-      if (!selfieTemporariaUrl) {
-        const url = await gerarUrlTemporariaSelfie(perfilDetalhes.selfie_url);
+      const caminho = perfilDetalhes?.selfie_url || usuarioLogado?.selfie_url;
+      if (!selfieTemporariaUrl && caminho) {
+        const url = await gerarUrlTemporariaSelfie(caminho);
         setSelfieTemporariaUrl(url);
       }
     } else {
@@ -736,25 +725,49 @@ export default function VilaMarketApp() {
     setCarregando(true);
 
     try {
+      // 1. Envia a foto para o Bucket Privado 'selfies'
       const caminhoPrivado = await enviarSelfieParaStoragePrivado(
         fotoCapturada,
         usuarioLogado.perfil_id
       );
 
-      const { error } = await supabase
-        .from('perfis')
-        .update({
-          selfie_url: caminhoPrivado,
-          status_facial: 'ativo',
-        })
-        .eq('id', usuarioLogado.perfil_id);
+      // 2. Grava o caminho no banco via RPC segura (garante atualização sem bloqueio de RLS)
+      const { data: rpcRes, error: rpcErr } = await supabase.rpc('atualizar_selfie_usuario', {
+        p_perfil_id: usuarioLogado.perfil_id,
+        p_caminho_selfie: caminhoPrivado,
+      });
 
-      if (error) throw error;
+      if (rpcErr || !rpcRes?.sucesso) {
+        throw new Error(rpcErr?.message || rpcRes?.mensagem || 'Falha ao vincular foto no perfil.');
+      }
 
-      await carregarDadosDashboard();
+      // 3. Atualiza os estados na tela IMEDIATAMENTE para remover o aviso amarelo e exibir a foto
+      setSelfieTemporariaUrl(fotoCapturada);
+      setPerfilDetalhes((prev: any) => ({
+        ...(prev || {}),
+        selfie_url: caminhoPrivado,
+        status_facial: 'ativo',
+      }));
+
+      const usuarioAtualizado = {
+        ...usuarioLogado,
+        selfie_url: caminhoPrivado,
+        status_facial: 'ativo',
+      };
+      setUsuarioLogado(usuarioAtualizado);
+      salvarSessaoNoNavegador(usuarioAtualizado);
+
+      // 4. Fecha o modal e mostra confirmação limpa no topo da tela
+      setFotoCapturada(null);
       setModoTrocaSelfie(false);
       setModalAtivo(null);
-      alert('Selfie validada e salva com criptografia LGPD para o leitor facial da porta!');
+      setMensagem({
+        tipo: 'sucesso',
+        texto: '✅ Selfie salva e sincronizada! Seu acesso facial na porta já está ativo.',
+      });
+
+      // Atualiza também em segundo plano pelo banco
+      carregarDadosDashboard();
     } catch (err: any) {
       alert('Erro ao salvar selfie: ' + (err.message || 'Tente novamente.'));
     } finally {
@@ -949,8 +962,9 @@ export default function VilaMarketApp() {
 
     setCarregando(true);
     try {
-      if (perfilDetalhes?.selfie_url && !perfilDetalhes.selfie_url.startsWith('data:image')) {
-        await supabase.storage.from('selfies').remove([perfilDetalhes.selfie_url]);
+      const caminho = perfilDetalhes?.selfie_url || usuarioLogado?.selfie_url;
+      if (caminho && !caminho.startsWith('data:image')) {
+        await supabase.storage.from('selfies').remove([caminho]);
       }
 
       await supabase
@@ -975,7 +989,7 @@ export default function VilaMarketApp() {
   }
 
   const unidadesFiltradas = unidades.filter((u) => u.tipo === tipoUnidade);
-  const temSelfie = Boolean(perfilDetalhes?.selfie_url);
+  const temSelfie = Boolean(perfilDetalhes?.selfie_url || usuarioLogado?.selfie_url || selfieTemporariaUrl);
   const roleUsuario = perfilDetalhes?.role || usuarioLogado?.role || 'titular';
 
   if (verificandoSessao) {
@@ -1317,40 +1331,51 @@ export default function VilaMarketApp() {
               {/* SUB-ABA INÍCIO */}
               {abaInferior === 'inicio' && (
                 <>
-                  {/* Card de Status Facial */}
-                  <div
-                    className={`border p-4 rounded-xl ${
-                      temSelfie
-                        ? 'bg-emerald-50 border-emerald-200'
-                        : 'bg-amber-50 border-amber-200'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <p
-                        className={`text-xs font-bold uppercase ${
-                          temSelfie ? 'text-emerald-800' : 'text-amber-800'
-                        }`}
-                      >
-                        {temSelfie
-                          ? '✅ Acesso Facial Porta • Selfie Ativa'
-                          : '⚠️ Acesso Facial Porta • Selfie Pendente'}
-                      </p>
-                      {!temSelfie && (
+                  {/* Card de Boas-Vindas (O aviso amarelo de selfie some automaticamente quando a selfie já foi enviada) */}
+                  {!temSelfie ? (
+                    <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-bold uppercase text-amber-800">
+                          ⚠️ Acesso Facial Porta • Selfie Pendente
+                        </p>
                         <button
+                          type="button"
                           onClick={abrirModalSelfie}
                           className="text-[11px] bg-floresta text-white px-2.5 py-1 rounded-lg font-bold shrink-0"
                         >
                           Enviar Selfie
                         </button>
+                      </div>
+                      <h2 className="text-lg font-bold text-grafite mt-1">
+                        Olá, {usuarioLogado.nome_completo}
+                      </h2>
+                      <p className="text-xs text-gray-600">
+                        {usuarioLogado.unidade_formatada || usuarioLogado.unidade}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="bg-emerald-50/80 border border-emerald-200 p-4 rounded-xl flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[11px] font-bold uppercase text-emerald-800">
+                          ✅ Acesso Facial Porta Ativo
+                        </p>
+                        <h2 className="text-lg font-bold text-grafite mt-0.5">
+                          Olá, {usuarioLogado.nome_completo}
+                        </h2>
+                        <p className="text-xs text-gray-600">
+                          {usuarioLogado.unidade_formatada || usuarioLogado.unidade}
+                        </p>
+                      </div>
+                      {selfieTemporariaUrl && (
+                        <img
+                          src={selfieTemporariaUrl}
+                          alt="Foto do morador"
+                          onClick={abrirModalSelfie}
+                          className="w-12 h-12 rounded-full object-cover border-2 border-emerald-600 shadow-sm cursor-pointer shrink-0"
+                        />
                       )}
                     </div>
-                    <h2 className="text-lg font-bold text-grafite mt-1">
-                      Olá, {usuarioLogado.nome_completo}
-                    </h2>
-                    <p className="text-xs text-gray-600">
-                      {usuarioLogado.unidade_formatada || usuarioLogado.unidade}
-                    </p>
-                  </div>
+                  )}
 
                   {/* Cards de Saldo Cashback e Saldo Pré-Pago */}
                   <div className="grid grid-cols-2 gap-3">
@@ -1666,7 +1691,6 @@ export default function VilaMarketApp() {
               </div>
             ) : !fotoCapturada ? (
               <div className="space-y-3">
-                {/* Barra de Diagnóstico em Tempo Real */}
                 <div
                   className={`p-2.5 rounded-xl text-xs font-semibold text-center border transition-colors ${
                     qualidadeCamera.aprovada
@@ -1677,7 +1701,6 @@ export default function VilaMarketApp() {
                   {qualidadeCamera.mensagem}
                 </div>
 
-                {/* Container da Câmera com Guia Oval de Enquadramento */}
                 <div className="relative w-full h-64 rounded-xl overflow-hidden bg-black">
                   <video
                     ref={videoRef}
@@ -1686,7 +1709,6 @@ export default function VilaMarketApp() {
                     muted
                     className="w-full h-full object-cover scale-x-[-1]"
                   />
-                  {/* Máscara Oval de Guia Facial */}
                   <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
                     <div
                       className={`w-40 h-52 rounded-full border-4 border-dashed transition-colors ${
@@ -1696,7 +1718,6 @@ export default function VilaMarketApp() {
                   </div>
                 </div>
 
-                {/* Indicadores Rápidos */}
                 <div className="grid grid-cols-3 gap-1.5 text-[10px] text-center font-bold">
                   <span
                     className={`py-1 rounded-lg ${
@@ -1881,7 +1902,7 @@ export default function VilaMarketApp() {
         </div>
       )}
 
-      {/* MODAL 4: ADICIONAR DEPENDENTE (COM MESMA VALIDAÇÃO DE QUALIDADE DE SELFIE) */}
+      {/* MODAL 4: ADICIONAR DEPENDENTE */}
       {modalAtivo === 'novo_dependente' && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
           <form
@@ -2007,7 +2028,6 @@ export default function VilaMarketApp() {
               )}
             </div>
 
-            {/* CONSENTIMENTO PARENTAL LGPD (ART. 14) */}
             <label className="flex items-start gap-2 bg-gray-50 p-2.5 rounded-xl border border-gray-200 text-[10px] text-gray-600 cursor-pointer">
               <input
                 type="checkbox"
@@ -2044,7 +2064,7 @@ export default function VilaMarketApp() {
         </div>
       )}
 
-      {/* MODAL 5: ADICIONAR SALDO PIX AO DEPENDENTE (COM CONFIRMAÇÃO DE PIN) */}
+      {/* MODAL 5: ADICIONAR SALDO PIX AO DEPENDENTE */}
       {modalAtivo === 'pix_dependente' && dependenteSelecionado && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4">
@@ -2092,7 +2112,6 @@ export default function VilaMarketApp() {
               </button>
             </div>
 
-            {/* TRAVA DE SEGURANÇA PARA SESSÃO DE 7 DIAS */}
             <div>
               <label className="block text-[11px] font-bold text-gray-600 mb-1">
                 Confirme seu PIN de 4 dígitos (Segurança):
