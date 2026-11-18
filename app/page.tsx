@@ -311,14 +311,14 @@ export default function VilaMarketApp() {
     } else if (taxaTopoTesta < 0.38) {
       // Na image_fef6c8.jpg o cabelo começa só em ~30%, deixando y=20..34% sem testa -> bloqueia!
       motivo = 'Rosto muito baixo! Suba o celular para preencher a parte superior do oval.';
-    } else if (melhorLinhaOlhos !== -1 && maiorContrasteOcular > 6 && linhaOlhosNorm > 0.51) {
+    } else if (melhorLinhaOlhos !== -1 && maiorContrasteOcular > 6 && linhaOlhosNorm > 0.56) {
       // Olhos abaixo da metade do oval -> bloqueia!
       motivo = 'Alinhe os olhos mais para o meio da moldura oval (suba um pouco o celular).';
     } else if (melhorLinhaOlhos !== -1 && maiorContrasteOcular > 6 && linhaOlhosNorm < 0.36) {
       motivo = 'Rosto muito alto! Abaixe um pouco o celular.';
     } else if (taxaOlhos < 0.45 || taxaBocaQueixo < 0.45) {
       motivo = 'Centralize o rosto inteiro dentro da guia pontilhada.';
-    } else if (taxaFora > 0.22 || taxaAbaixoQueixo > 0.48) {
+    } else if (taxaFora > 0.42 || taxaAbaixoQueixo > 0.72) {
       // Queixo vazando na borda inferior (como na image_fef6c8.jpg) -> bloqueia!
       motivo = 'Rosto muito perto ou queixo cortado embaixo. Afaste um pouco o celular.';
     } else if (Math.abs(centroX - cx) > tamanho * 0.09) {
