@@ -892,11 +892,11 @@ export default function AbaEstoqueScanGo({
         </>
       )}
 
-      {/* MODAL SCAN & GO (FECHA AO CLICAR FORA OU EM FECHAR) */}
+      {/* MODAL SCAN & GO (OVERLAY TELA CHEIA SEM MARGEM) */}
       {modalInterno === 'scan_go' && (
         <div
           onClick={fecharModalScanGo}
-          className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4 overflow-y-auto"
+          className="fixed inset-0 !m-0 w-screen h-screen bg-black/75 z-50 flex items-center justify-center p-4 overflow-y-auto"
         >
           <div
             onClick={(e) => e.stopPropagation()}
@@ -1093,7 +1093,7 @@ export default function AbaEstoqueScanGo({
       {modalInterno === 'sugerir_produto' && (
         <div
           onClick={() => setModalInterno(null)}
-          className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 !m-0 w-screen h-screen bg-black/70 z-50 flex items-center justify-center p-4"
         >
           <form
             onClick={(e) => e.stopPropagation()}
@@ -1158,7 +1158,7 @@ export default function AbaEstoqueScanGo({
       {modalInterno === 'novo_produto_admin' && (
         <div
           onClick={() => setModalInterno(null)}
-          className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 overflow-y-auto"
+          className="fixed inset-0 !m-0 w-screen h-screen bg-black/70 z-50 flex items-center justify-center p-4 overflow-y-auto"
         >
           <form
             onClick={(e) => e.stopPropagation()}

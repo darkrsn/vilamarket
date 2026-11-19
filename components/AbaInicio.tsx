@@ -230,7 +230,7 @@ export default function AbaInicio({
       {avisoExpandido && (
         <div
           onClick={() => setAvisoExpandido(null)}
-          className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4 overflow-y-auto"
+          className="fixed inset-0 !m-0 w-screen h-screen bg-black/75 z-50 flex items-center justify-center p-4 overflow-y-auto"
         >
           <article
             onClick={(e) => e.stopPropagation()}

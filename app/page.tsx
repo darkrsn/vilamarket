@@ -313,30 +313,32 @@ export default function VilaMarketApp() {
           )}
 
           {aba === 'painel' && usuarioLogado && (
-            <div className="space-y-5">
+            <div>
               {abaInferior === 'inicio' && (
-                <AbaInicio
-                  usuarioLogado={usuarioLogado}
-                  perfilDetalhes={perfilDetalhes}
-                  temSelfie={temSelfie}
-                  selfieTemporariaUrl={selfieTemporariaUrl}
-                  roleUsuario={roleUsuario}
-                  dependentesLista={dependentesLista}
-                  dependentesSelfiesMap={dependentesSelfiesMap}
-                  avisosLista={avisosLista}
-                  onAbrirSelfie={() => setModalAtivo('selfie')}
-                  onAbrirScanGo={() => setAbrirScanGoDireto(true)}
-                  onAbrirNovoDependente={() => setModalAtivo('novo_dependente')}
-                  onGerenciarDependente={(dep) => {
-                    setDepGerenciando(dep);
-                    setModalAtivo('gerenciar_dependente');
-                  }}
-                  onAbrirPixDependente={(dep) => {
-                    setDependenteSelecionado(dep);
-                    setModalAtivo('pix_dependente');
-                  }}
-                  onVerMural={() => navegarParaAba('painel', 'mural')}
-                />
+                <div className="space-y-5">
+                  <AbaInicio
+                    usuarioLogado={usuarioLogado}
+                    perfilDetalhes={perfilDetalhes}
+                    temSelfie={temSelfie}
+                    selfieTemporariaUrl={selfieTemporariaUrl}
+                    roleUsuario={roleUsuario}
+                    dependentesLista={dependentesLista}
+                    dependentesSelfiesMap={dependentesSelfiesMap}
+                    avisosLista={avisosLista}
+                    onAbrirSelfie={() => setModalAtivo('selfie')}
+                    onAbrirScanGo={() => setAbrirScanGoDireto(true)}
+                    onAbrirNovoDependente={() => setModalAtivo('novo_dependente')}
+                    onGerenciarDependente={(dep) => {
+                      setDepGerenciando(dep);
+                      setModalAtivo('gerenciar_dependente');
+                    }}
+                    onAbrirPixDependente={(dep) => {
+                      setDependenteSelecionado(dep);
+                      setModalAtivo('pix_dependente');
+                    }}
+                    onVerMural={() => navegarParaAba('painel', 'mural')}
+                  />
+                </div>
               )}
 
               {(abaInferior === 'estoque' || abrirScanGoDireto) && (
