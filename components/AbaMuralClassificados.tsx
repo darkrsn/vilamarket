@@ -400,8 +400,16 @@ export default function AbaMuralClassificados({
       </div>
 
       {modalNovoAnuncioAberto && (
-        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 overflow-y-auto">
+        <div
+          onClick={() => {
+            setAnuncioFotoFile(null);
+            setAnuncioFotoPreview(null);
+            fecharModalNovoAnuncio();
+          }}
+          className="fixed inset-0 !m-0 w-screen h-screen bg-black/70 z-50 flex items-center justify-center p-4 overflow-y-auto"
+        >
           <form
+            onClick={(e) => e.stopPropagation()}
             onSubmit={publicarNovoAnuncio}
             className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-3 my-auto"
           >

@@ -892,7 +892,7 @@ export default function AbaEstoqueScanGo({
         </>
       )}
 
-      {/* MODAL SCAN & GO (OVERLAY TELA CHEIA SEM MARGEM) */}
+      {/* MODAL SCAN & GO */}
       {modalInterno === 'scan_go' && (
         <div
           onClick={fecharModalScanGo}
@@ -1093,12 +1093,12 @@ export default function AbaEstoqueScanGo({
       {modalInterno === 'sugerir_produto' && (
         <div
           onClick={() => setModalInterno(null)}
-          className="fixed inset-0 !m-0 w-screen h-screen bg-black/70 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 !m-0 w-screen h-screen bg-black/75 z-50 flex items-center justify-center p-4 overflow-y-auto"
         >
           <form
             onClick={(e) => e.stopPropagation()}
             onSubmit={enviarSugestaoOuRuptura}
-            className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-3"
+            className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-3 my-auto"
           >
             <h3 className="font-bold text-base text-grafite">Faltou algo na loja?</h3>
             <div className="grid grid-cols-2 gap-2">
@@ -1158,7 +1158,7 @@ export default function AbaEstoqueScanGo({
       {modalInterno === 'novo_produto_admin' && (
         <div
           onClick={() => setModalInterno(null)}
-          className="fixed inset-0 !m-0 w-screen h-screen bg-black/70 z-50 flex items-center justify-center p-4 overflow-y-auto"
+          className="fixed inset-0 !m-0 w-screen h-screen bg-black/75 z-50 flex items-center justify-center p-4 overflow-y-auto"
         >
           <form
             onClick={(e) => e.stopPropagation()}
