@@ -103,7 +103,7 @@ export default function VilaMarketApp() {
   const [dependenteSelecionado, setDependenteSelecionado] = useState<any | null>(null);
   const [avisosLista, setAvisosLista] = useState<any[]>([]);
 
-  function navegarParaAba(novaAba: AbaPrincipal, novaAbaInferior?: AbaInferior) {
+  function navegarParaAba(novaAba: AbaPrincipal, novaAbaInferior?: any) {
     setAba(novaAba);
     const abaAlvo = novaAbaInferior || abaInferior;
     if (novaAbaInferior) setAbaInferior(novaAbaInferior);
