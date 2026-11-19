@@ -963,12 +963,6 @@ export default function VilaMarketApp() {
     }
   }
 
-  async function adminExcluirAvisoMural(id: string) {
-    if (!window.confirm('Excluir este aviso do Mural?')) return;
-    const { error } = await supabase.from('avisos_mural').delete().eq('id', id);
-    if (!error) await carregarDadosAdmin();
-  }
-
   // =========================================================================
   // LOGIN, CADASTRO E WHATSAPP (ENVIA APENAS OS 11 NÚMEROS LIMPOS AO BANCO)
   // =========================================================================
