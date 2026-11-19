@@ -6,6 +6,7 @@ import AuthTelas from '@/components/AuthTelas';
 import AbaInicio from '@/components/AbaInicio';
 import AbaEstoqueScanGo from '@/components/AbaEstoqueScanGo';
 import AbaMuralClassificados from '@/components/AbaMuralClassificados';
+import AbaAjuda from '@/components/AbaAjuda';
 import AbaAdmin from '@/components/AbaAdmin';
 import ModaisDependentes from '@/components/ModaisDependentes';
 import ModaisPerfil from '@/components/ModaisPerfil';
@@ -15,21 +16,6 @@ const CHAVE_STORAGE = 'vilamarket_sessao_v1';
 
 type AbaPrincipal = 'login' | 'cadastro' | 'confirmar_wa' | 'esqueci_pin' | 'painel';
 type AbaInferior = 'inicio' | 'estoque' | 'mural' | 'ajuda' | 'perfil' | 'admin';
-
-const PASSOS_AJUDA = [
-  {
-    titulo: '1. Abertura da Porta (Acesso Facial)',
-    texto: 'Cadastre sua selfie na tela inicial com boa iluminação. Ao chegar na porta do minimercado, olhe para o leitor facial e a trava será liberada em menos de 1 segundo.',
-  },
-  {
-    titulo: '2. Totem ou Scan & Go no Celular',
-    texto: 'Você pode pagar no totem da loja ou escanear os produtos direto pelo celular no Scan & Go. Pagando via Pix você recebe 2% de cashback na hora.',
-  },
-  {
-    titulo: '3. Dependentes & Controle Familiar',
-    texto: 'Titulares podem cadastrar dependentes (a partir de 12 anos) com saldo pré-pago individual e acompanhar cada compra no extrato detalhado.',
-  },
-];
 
 async function gerarUrlTemporariaSelfie(caminhoOuBase64: string | null): Promise<string | null> {
   if (!caminhoOuBase64) return null;
@@ -374,27 +360,7 @@ export default function VilaMarketApp() {
                 />
               )}
 
-              {abaInferior === 'ajuda' && (
-                <div className="space-y-4">
-                  <h2 className="text-lg font-bold text-grafite">Como Usar o VilaMarket</h2>
-                  <div className="space-y-2.5 text-xs">
-                    {PASSOS_AJUDA.map((passo) => (
-                      <div key={passo.titulo} className="bg-gray-50 border border-gray-200 p-3.5 rounded-xl space-y-1">
-                        <p className="font-bold text-floresta">{passo.titulo}</p>
-                        <p className="text-gray-600">{passo.texto}</p>
-                      </div>
-                    ))}
-                  </div>
-                  <a
-                    href="https://wa.me/5541991455623?text=Ol%C3%A1!%20Preciso%20de%20ajuda%20com%20o%20app%20VilaMarket."
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="block w-full text-center bg-floresta hover:bg-floresta-claro text-white font-bold py-3 rounded-xl text-xs transition"
-                  >
-                    💬 Falar com o Suporte VilaMarket
-                  </a>
-                </div>
-              )}
+              {abaInferior === 'ajuda' && <AbaAjuda />}
 
               {abaInferior === 'perfil' && (
                 <div className="space-y-4">
