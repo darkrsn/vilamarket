@@ -161,7 +161,14 @@ export default function VilaMarketApp() {
 
   // Estados dos Modais da Dashboard
   const [modalAtivo, setModalAtivo] = useState<
-    null | 'selfie' | 'pin' | 'extrato' | 'novo_dependente' | 'pix_dependente' | 'novo_anuncio'
+    | null
+    | 'selfie'
+    | 'pin'
+    | 'extrato'
+    | 'novo_dependente'
+    | 'gerenciar_dependente'
+    | 'pix_dependente'
+    | 'novo_anuncio'
   >(null);
 
   // 1. Estados Modal Selfie + Análise de Qualidade
@@ -188,16 +195,19 @@ export default function VilaMarketApp() {
   const [dependentesLista, setDependentesLista] = useState<any[]>([]);
   const [dependentesSelfiesMap, setDependentesSelfiesMap] = useState<Record<string, string>>({});
 
-  // 4. Estados Cadastro de Dependente (Mínimo 12 anos)
+  // 4. Estados Cadastro e Gerenciamento de Dependente (Mínimo 12 anos)
   const [depNome, setDepNome] = useState('');
   const [depCpf, setDepCpf] = useState('');
   const [depNascimento, setDepNascimento] = useState('');
   const [depPin, setDepPin] = useState('');
   const [depSelfieBase64, setDepSelfieBase64] = useState<string | null>(null);
   const [aceiteLgpdDependente, setAceiteLgpdDependente] = useState(false);
+  const [depGerenciando, setDepGerenciando] = useState<any | null>(null);
+  const [depFotoNovaBase64, setDepFotoNovaBase64] = useState<string | null>(null);
 
-  // 5. Estados Recarga Pix Dependente
+  // 5. Estados Transferência / Recarga Pix Dependente
   const [dependenteSelecionado, setDependenteSelecionado] = useState<any>(null);
+  const [origemSaldoTransferencia, setOrigemSaldoTransferencia] = useState<'pre_pago' | 'cashback' | 'pix'>('pre_pago');
   const [valorPix, setValorPix] = useState('20.00');
   const [pixCopiaECola, setPixCopiaECola] = useState('');
   const [pinConfirmacaoPix, setPinConfirmacaoPix] = useState('');
@@ -249,7 +259,6 @@ export default function VilaMarketApp() {
     }
 
     if (aba === 'painel' && usuarioLogado?.perfil_id) {
-      // Limpa dados residuais de sessões anteriores antes de carregar o novo perfil
       setPerfilDetalhes(null);
       setSelfieTemporariaUrl(null);
       setDependentesLista([]);
@@ -551,7 +560,6 @@ export default function VilaMarketApp() {
   }
 
   async function enviarFotoPublicaComunidade(file: File, pasta: 'classificados' | 'mural'): Promise<string> {
-    // Otimiza para largura máxima de 1200px (Full HD) e 88% JPEG (~350-500 KB)
     const arquivoOtimizado = await otimizarImagemParaUpload(file, 1200);
     const caminho = `${pasta}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
 
@@ -623,7 +631,6 @@ export default function VilaMarketApp() {
     const idAlvo = usuarioLogado?.perfil_id;
     if (!idAlvo) return;
 
-    // 1. Se já veio o caminho da selfie no login, busca imediatamente
     if (usuarioLogado?.selfie_url) {
       gerarUrlTemporariaSelfie(usuarioLogado.selfie_url).then((url) => {
         if (url && usuarioLogado?.perfil_id === idAlvo) {
@@ -634,7 +641,6 @@ export default function VilaMarketApp() {
       setSelfieTemporariaUrl(null);
     }
 
-    // 2. Busca os dados atualizados direto do banco
     const [resPerfil, resDeps] = await Promise.all([
       supabase
         .from('perfis')
@@ -1235,7 +1241,11 @@ export default function VilaMarketApp() {
 
       const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
       if (paraDependente) {
-        setDepSelfieBase64(dataUrl);
+        if (modalAtivo === 'gerenciar_dependente') {
+          setDepFotoNovaBase64(dataUrl);
+        } else {
+          setDepSelfieBase64(dataUrl);
+        }
       } else {
         setFotoCapturada(dataUrl);
       }
@@ -1353,11 +1363,7 @@ export default function VilaMarketApp() {
       alert('A idade mínima para cadastro de dependente é de 12 anos.');
       return;
     }
-    if (!depSelfieBase64) {
-      alert('Tire a selfie do dependente com boa iluminação para liberar o acesso facial na porta.');
-      return;
-    }
-    if (!aceiteLgpdDependente) {
+    if (depSelfieBase64 && !aceiteLgpdDependente) {
       alert(
         'Por exigência da LGPD (Art. 14), confirme o consentimento parental para o uso da imagem facial do dependente.'
       );
@@ -1398,7 +1404,10 @@ export default function VilaMarketApp() {
       }
 
       const novoDepId = authData.user.id;
-      const caminhoSelfieDep = await enviarSelfieParaStoragePrivado(depSelfieBase64, novoDepId);
+      let caminhoSelfieDep: string | null = null;
+      if (depSelfieBase64) {
+        caminhoSelfieDep = await enviarSelfieParaStoragePrivado(depSelfieBase64, novoDepId);
+      }
 
       const { error: insertErr } = await supabase.from('perfis').insert({
         id: novoDepId,
@@ -1415,7 +1424,7 @@ export default function VilaMarketApp() {
         selfie_url: caminhoSelfieDep,
         pin_hash: 'temp',
         status_cadastro: 'aprovado',
-        status_facial: 'ativo',
+        status_facial: caminhoSelfieDep ? 'ativo' : 'pendente',
       });
 
       if (insertErr) throw new Error(insertErr.message);
@@ -1441,7 +1450,11 @@ export default function VilaMarketApp() {
       fecharCamera();
       setModalAtivo(null);
       await carregarDadosDashboard();
-      alert('Dependente cadastrado com sucesso e protegido pela LGPD!');
+      alert(
+        caminhoSelfieDep
+          ? 'Dependente cadastrado com sucesso e acesso facial ativo!'
+          : 'Dependente cadastrado! Você pode adicionar a selfie dele depois em Gerenciar.'
+      );
     } catch (err: any) {
       alert('Erro ao cadastrar dependente: ' + (err.message || 'Tente novamente.'));
     } finally {
@@ -1449,8 +1462,111 @@ export default function VilaMarketApp() {
     }
   }
 
+  async function salvarNovaSelfieDependente() {
+    if (!depGerenciando || !depFotoNovaBase64) return;
+    setCarregando(true);
+    try {
+      if (depGerenciando.selfie_url && !depGerenciando.selfie_url.startsWith('data:image')) {
+        await supabase.storage.from('selfies').remove([depGerenciando.selfie_url]);
+      }
+
+      const caminhoNovo = await enviarSelfieParaStoragePrivado(
+        depFotoNovaBase64,
+        depGerenciando.id
+      );
+
+      const { data: rpcRes, error: rpcErr } = await supabase.rpc('atualizar_selfie_usuario', {
+        p_perfil_id: depGerenciando.id,
+        p_caminho_selfie: caminhoNovo,
+      });
+
+      if (rpcErr || !rpcRes?.sucesso) {
+        throw new Error(rpcErr?.message || rpcRes?.mensagem || 'Erro ao atualizar foto.');
+      }
+
+      setDepFotoNovaBase64(null);
+      setDepGerenciando(null);
+      fecharCamera();
+      setModalAtivo(null);
+      await carregarDadosDashboard();
+      alert('Selfie do dependente atualizada e acesso facial liberado!');
+    } catch (err: any) {
+      alert('Erro ao salvar selfie: ' + (err.message || 'Tente novamente.'));
+    } finally {
+      setCarregando(false);
+    }
+  }
+
+  async function removerFotoDependente(dep: any) {
+    if (
+      !window.confirm(
+        `Remover a foto facial de ${dep.nome_completo}? O acesso na porta ficará pendente até tirar outra.`
+      )
+    ) {
+      return;
+    }
+    setCarregando(true);
+    try {
+      if (dep.selfie_url && !dep.selfie_url.startsWith('data:image')) {
+        await supabase.storage.from('selfies').remove([dep.selfie_url]);
+      }
+
+      const { error } = await supabase
+        .from('perfis')
+        .update({ selfie_url: null, status_facial: 'pendente' })
+        .eq('id', dep.id)
+        .eq('titular_id', usuarioLogado.perfil_id);
+
+      if (error) throw new Error(error.message);
+
+      setDepGerenciando(null);
+      setModalAtivo(null);
+      await carregarDadosDashboard();
+      alert('Foto facial do dependente removida.');
+    } catch (err: any) {
+      alert('Erro ao remover foto: ' + err.message);
+    } finally {
+      setCarregando(false);
+    }
+  }
+
+  async function excluirDependente(dep: any) {
+    if (
+      !window.confirm(
+        `Tem certeza que deseja excluir o dependente ${dep.nome_completo}? Esta ação remove o acesso e a foto dele do sistema.`
+      )
+    ) {
+      return;
+    }
+    setCarregando(true);
+    try {
+      if (dep.selfie_url && !dep.selfie_url.startsWith('data:image')) {
+        await supabase.storage.from('selfies').remove([dep.selfie_url]);
+      }
+
+      const { data, error } = await supabase.rpc('excluir_dependente_titular', {
+        p_titular_id: usuarioLogado.perfil_id,
+        p_dependente_id: dep.id,
+      });
+
+      if (error || !data?.sucesso) {
+        throw new Error(error?.message || data?.mensagem || 'Não foi possível excluir o dependente.');
+      }
+
+      setDepGerenciando(null);
+      setModalAtivo(null);
+      await carregarDadosDashboard();
+      alert('Dependente excluído com sucesso.');
+    } catch (err: any) {
+      alert('Erro ao excluir dependente: ' + err.message);
+    } finally {
+      setCarregando(false);
+    }
+  }
+
   function abrirModalPixDependente(dep: any) {
     setDependenteSelecionado(dep);
+    setOrigemSaldoTransferencia('pre_pago');
     setValorPix('20.00');
     setPinConfirmacaoPix('');
     setPixCopiaECola(
@@ -1480,21 +1596,39 @@ export default function VilaMarketApp() {
       return;
     }
 
-    const { data, error } = await supabase.rpc('adicionar_saldo_pix', {
-      p_perfil_id: dependenteSelecionado.id,
-      p_valor: parseFloat(valorPix),
-    });
-    setCarregando(false);
+    const valorNumerico = parseFloat(valorPix);
 
-    if (error || !data?.sucesso) {
-      alert(error?.message || data?.mensagem || 'Erro ao creditar saldo.');
-      return;
+    if (origemSaldoTransferencia === 'pix') {
+      const { data, error } = await supabase.rpc('adicionar_saldo_pix', {
+        p_perfil_id: dependenteSelecionado.id,
+        p_valor: valorNumerico,
+      });
+      setCarregando(false);
+
+      if (error || !data?.sucesso) {
+        alert(error?.message || data?.mensagem || 'Erro ao creditar saldo.');
+        return;
+      }
+      alert(data.mensagem);
+    } else {
+      const { data, error } = await supabase.rpc('transferir_saldo_dependente', {
+        p_titular_id: usuarioLogado.perfil_id,
+        p_dependente_id: dependenteSelecionado.id,
+        p_valor: valorNumerico,
+        p_origem: origemSaldoTransferencia,
+      });
+      setCarregando(false);
+
+      if (error || !data?.sucesso) {
+        alert(error?.message || data?.mensagem || 'Erro ao transferir saldo.');
+        return;
+      }
+      alert(data.mensagem);
     }
 
     await carregarDadosDashboard();
     setPinConfirmacaoPix('');
     setModalAtivo(null);
-    alert(data.mensagem);
   }
 
   async function solicitarExclusaoDadosLgpd() {
@@ -2054,7 +2188,7 @@ export default function VilaMarketApp() {
                                       className="w-10 h-10 rounded-full object-cover border border-emerald-600 shrink-0"
                                     />
                                   ) : (
-                                    <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-xs font-bold text-gray-600 shrink-0">
+                                    <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center text-xs font-bold text-amber-800 shrink-0">
                                       👤
                                     </div>
                                   )}
@@ -2067,10 +2201,16 @@ export default function VilaMarketApp() {
                                         className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
                                           depBloqueado
                                             ? 'bg-red-100 text-red-700'
-                                            : 'bg-emerald-100 text-emerald-800'
+                                            : dep.selfie_url
+                                            ? 'bg-emerald-100 text-emerald-800'
+                                            : 'bg-amber-100 text-amber-800'
                                         }`}
                                       >
-                                        {depBloqueado ? 'Bloqueado' : 'Ativo'}
+                                        {depBloqueado
+                                          ? 'Bloqueado'
+                                          : dep.selfie_url
+                                          ? 'Facial Ativo'
+                                          : 'Sem Selfie'}
                                       </span>
                                     </div>
                                     <p className="text-xs text-emerald-700 font-semibold">
@@ -2078,13 +2218,26 @@ export default function VilaMarketApp() {
                                     </p>
                                   </div>
                                 </div>
-                                <button
-                                  type="button"
-                                  onClick={() => abrirModalPixDependente(dep)}
-                                  className="bg-ambar text-white text-xs font-bold px-3 py-2 rounded-xl transition shrink-0"
-                                >
-                                  + Pix
-                                </button>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => abrirModalPixDependente(dep)}
+                                    className="bg-ambar text-white text-[11px] font-bold px-2.5 py-1.5 rounded-xl transition"
+                                  >
+                                    + Saldo
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setDepGerenciando(dep);
+                                      setDepFotoNovaBase64(null);
+                                      setModalAtivo('gerenciar_dependente');
+                                    }}
+                                    className="bg-gray-200 hover:bg-gray-300 text-gray-800 text-[11px] font-bold px-2.5 py-1.5 rounded-xl transition"
+                                  >
+                                    ⚙️ Gerenciar
+                                  </button>
+                                </div>
                               </div>
                             );
                           })}
@@ -3369,7 +3522,7 @@ export default function VilaMarketApp() {
         </div>
       )}
 
-      {/* MODAL 4: ADICIONAR DEPENDENTE (COM MÁSCARA DE CPF E TRAVA DE 11 DÍGITOS) */}
+      {/* MODAL 4: ADICIONAR DEPENDENTE (SELFIE OPCIONAL NA HORA) */}
       {modalAtivo === 'novo_dependente' && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
           <form
@@ -3378,7 +3531,8 @@ export default function VilaMarketApp() {
           >
             <h3 className="font-bold text-base text-grafite">Adicionar Dependente</h3>
             <p className="text-[11px] text-gray-500">
-              Idade mínima de 12 anos. O dependente terá acesso facial na porta e PIN próprio.
+              Idade mínima de 12 anos. Você pode tirar a selfie agora ou adicionar depois em
+              Gerenciar.
             </p>
             <input
               type="text"
@@ -3461,24 +3615,29 @@ export default function VilaMarketApp() {
                     </button>
                   </div>
                 ) : (
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      const s = await navigator.mediaDevices.getUserMedia({
-                        video: { facingMode: 'user', width: 480, height: 480 },
-                      });
-                      setStreamCamera(s);
-                      setTimeout(() => {
-                        if (videoRef.current) {
-                          videoRef.current.srcObject = s;
-                          iniciarMonitoramentoQualidade();
-                        }
-                      }, 150);
-                    }}
-                    className="text-xs font-bold text-floresta underline"
-                  >
-                    📷 Tirar Selfie do Dependente
-                  </button>
+                  <div className="space-y-1">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const s = await navigator.mediaDevices.getUserMedia({
+                          video: { facingMode: 'user', width: 480, height: 480 },
+                        });
+                        setStreamCamera(s);
+                        setTimeout(() => {
+                          if (videoRef.current) {
+                            videoRef.current.srcObject = s;
+                            iniciarMonitoramentoQualidade();
+                          }
+                        }, 150);
+                      }}
+                      className="text-xs font-bold text-floresta underline"
+                    >
+                      📷 Tirar Selfie do Dependente (Opcional agora)
+                    </button>
+                    <p className="text-[10px] text-gray-400">
+                      Se o dependente não estiver perto, salve agora e tire a foto depois.
+                    </p>
+                  </div>
                 )
               ) : (
                 <div className="space-y-1">
@@ -3506,7 +3665,7 @@ export default function VilaMarketApp() {
                 className="mt-0.5 accent-floresta"
               />
               <span>
-                Declaro ser responsável legal e autorizo o tratamento da imagem facial e dados do
+                Declaro ser responsável legal e autorizo o tratamento dos dados e imagem facial do
                 dependente exclusivamente para acesso ao VilaMarket (Art. 14 da LGPD).
               </span>
             </label>
@@ -3534,15 +3693,235 @@ export default function VilaMarketApp() {
         </div>
       )}
 
-      {/* MODAL 5: ADICIONAR SALDO PIX AO DEPENDENTE */}
+      {/* MODAL: GERENCIAR DEPENDENTE (ADICIONAR/TROCAR FOTO, APAGAR FOTO, EXCLUIR) */}
+      {modalAtivo === 'gerenciar_dependente' && depGerenciando && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4 my-auto">
+            <div>
+              <h3 className="font-bold text-base text-grafite">{depGerenciando.nome_completo}</h3>
+              <p className="text-[11px] text-gray-500">
+                CPF: {formatarCPFVisual(depGerenciando.cpf || '')} • Status facial:{' '}
+                <span
+                  className={
+                    depGerenciando.selfie_url
+                      ? 'text-emerald-700 font-bold'
+                      : 'text-amber-600 font-bold'
+                  }
+                >
+                  {depGerenciando.selfie_url ? 'Ativo (Foto cadastrada)' : 'Pendente de selfie'}
+                </span>
+              </p>
+            </div>
+
+            <div className="border rounded-xl p-3 bg-gray-50 text-center space-y-3">
+              {depFotoNovaBase64 ? (
+                <div className="space-y-2">
+                  <img
+                    src={depFotoNovaBase64}
+                    alt="Nova selfie"
+                    className="w-32 h-32 rounded-full mx-auto object-cover border-2 border-emerald-600 scale-x-[-1]"
+                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setDepFotoNovaBase64(null)}
+                      className="bg-gray-200 text-gray-700 font-bold py-2 rounded-lg text-xs"
+                    >
+                      Tirar Outra
+                    </button>
+                    <button
+                      type="button"
+                      onClick={salvarNovaSelfieDependente}
+                      disabled={carregando}
+                      className="bg-floresta text-white font-bold py-2 rounded-lg text-xs"
+                    >
+                      {carregando ? 'Salvando...' : 'Salvar Foto'}
+                    </button>
+                  </div>
+                </div>
+              ) : streamCamera ? (
+                <div className="space-y-2">
+                  <p
+                    className={`text-[11px] font-semibold p-1.5 rounded-lg ${
+                      qualidadeCamera.aprovada
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : 'bg-amber-100 text-amber-800'
+                    }`}
+                  >
+                    {qualidadeCamera.mensagem}
+                  </p>
+                  <div className="relative aspect-square max-w-[220px] mx-auto w-full rounded-xl overflow-hidden bg-black">
+                    <video
+                      ref={videoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      className="w-full h-full object-cover scale-x-[-1]"
+                    />
+                    <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                      <div
+                        className={`w-36 h-48 rounded-full border-4 border-dashed ${
+                          qualidadeCamera.aprovada ? 'border-emerald-400' : 'border-amber-400'
+                        }`}
+                      />
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => capturarFrameSelfie(true)}
+                    disabled={!qualidadeCamera.aprovada}
+                    className={`text-xs font-bold px-4 py-2 rounded-lg w-full ${
+                      qualidadeCamera.aprovada
+                        ? 'bg-floresta text-white'
+                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    }`}
+                  >
+                    {qualidadeCamera.aprovada ? '📸 Capturar Foto' : 'Ajuste rosto e luz'}
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {dependentesSelfiesMap[depGerenciando.id] ? (
+                    <img
+                      src={dependentesSelfiesMap[depGerenciando.id]}
+                      alt="Foto atual"
+                      className="w-28 h-28 rounded-full mx-auto object-cover border-2 border-emerald-600"
+                    />
+                  ) : (
+                    <div className="w-24 h-24 rounded-full mx-auto bg-amber-100 text-amber-800 flex items-center justify-center text-xs font-bold">
+                      Sem foto
+                    </div>
+                  )}
+
+                  <div className="flex flex-col gap-2">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const s = await navigator.mediaDevices.getUserMedia({
+                          video: { facingMode: 'user', width: 480, height: 480 },
+                        });
+                        setStreamCamera(s);
+                        setTimeout(() => {
+                          if (videoRef.current) {
+                            videoRef.current.srcObject = s;
+                            iniciarMonitoramentoQualidade();
+                          }
+                        }, 150);
+                      }}
+                      className="w-full bg-floresta text-white font-bold py-2.5 rounded-xl text-xs"
+                    >
+                      📷 {depGerenciando.selfie_url ? 'Trocar Selfie' : 'Tirar Selfie Agora'}
+                    </button>
+
+                    {depGerenciando.selfie_url && (
+                      <button
+                        type="button"
+                        onClick={() => removerFotoDependente(depGerenciando)}
+                        disabled={carregando}
+                        className="w-full bg-amber-50 text-amber-800 border border-amber-200 font-bold py-2 rounded-xl text-xs"
+                      >
+                        🗑️ Apagar Somente a Foto
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="pt-2 border-t border-gray-200 space-y-2">
+              <button
+                type="button"
+                onClick={() => excluirDependente(depGerenciando)}
+                disabled={carregando}
+                className="w-full bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 font-bold py-2.5 rounded-xl text-xs"
+              >
+                ❌ Excluir Dependente da Unidade
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  fecharCamera();
+                  setDepGerenciando(null);
+                  setDepFotoNovaBase64(null);
+                  setModalAtivo(null);
+                }}
+                className="w-full bg-gray-100 text-gray-700 font-bold py-2 rounded-xl text-xs"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 5: ENVIAR SALDO (PRÉ-PAGO, CASHBACK OU PIX) AO DEPENDENTE */}
       {modalAtivo === 'pix_dependente' && dependenteSelecionado && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4">
             <h3 className="font-bold text-base text-grafite">
-              Adicionar Saldo Pix • {dependenteSelecionado.nome_completo}
+              Enviar Saldo • {dependenteSelecionado.nome_completo}
             </h3>
+
+            {/* Seletor da origem do saldo */}
+            <div className="space-y-1.5">
+              <label className="block text-[11px] font-bold text-gray-600">
+                De onde sairá o saldo?
+              </label>
+              <div className="grid grid-cols-3 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setOrigemSaldoTransferencia('pre_pago')}
+                  className={`p-2 rounded-xl text-[11px] font-bold border text-center ${
+                    origemSaldoTransferencia === 'pre_pago'
+                      ? 'bg-floresta text-white border-floresta'
+                      : 'bg-gray-50 text-gray-700 border-gray-200'
+                  }`}
+                >
+                  Meu Pré-Pago
+                  <span className="block text-[10px] font-normal opacity-90">
+                    R${' '}
+                    {Number(
+                      perfilDetalhes?.saldo_pre_pago ?? usuarioLogado.saldo_pre_pago ?? 0
+                    ).toFixed(2)}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setOrigemSaldoTransferencia('cashback')}
+                  className={`p-2 rounded-xl text-[11px] font-bold border text-center ${
+                    origemSaldoTransferencia === 'cashback'
+                      ? 'bg-ambar text-white border-ambar'
+                      : 'bg-amber-50 text-amber-900 border-amber-200'
+                  }`}
+                >
+                  Meu Cashback
+                  <span className="block text-[10px] font-normal opacity-90">
+                    R${' '}
+                    {Number(
+                      perfilDetalhes?.saldo_cashback ?? usuarioLogado.saldo_cashback ?? 0
+                    ).toFixed(2)}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setOrigemSaldoTransferencia('pix')}
+                  className={`p-2 rounded-xl text-[11px] font-bold border text-center ${
+                    origemSaldoTransferencia === 'pix'
+                      ? 'bg-emerald-700 text-white border-emerald-700'
+                      : 'bg-gray-50 text-gray-700 border-gray-200'
+                  }`}
+                >
+                  Novo Pix
+                  <span className="block text-[10px] font-normal opacity-90">Recarga</span>
+                </button>
+              </div>
+            </div>
+
             <div className="grid grid-cols-3 gap-2">
-              {['20.00', '50.00', '100.00'].map((v) => (
+              {['10.00', '20.00', '50.00'].map((v) => (
                 <button
                   key={v}
                   type="button"
@@ -3555,6 +3934,7 @@ export default function VilaMarketApp() {
                 </button>
               ))}
             </div>
+
             <input
               type="number"
               step="0.01"
@@ -3562,25 +3942,28 @@ export default function VilaMarketApp() {
               onChange={(e) => setValorPix(e.target.value)}
               className="w-full p-2.5 border rounded-xl text-sm font-bold"
             />
-            <div className="bg-gray-50 p-3 rounded-xl border text-xs space-y-2">
-              <span className="font-bold text-gray-700 block">Chave Pix Copia e Cola:</span>
-              <input
-                type="text"
-                readOnly
-                value={pixCopiaECola}
-                className="w-full bg-white border rounded p-1.5 text-[10px] text-gray-500"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  navigator.clipboard.writeText(pixCopiaECola);
-                  alert('Código Pix copiado!');
-                }}
-                className="w-full bg-amber-100 text-amber-900 font-bold py-1.5 rounded-lg text-xs"
-              >
-                Copiar Código Pix
-              </button>
-            </div>
+
+            {origemSaldoTransferencia === 'pix' && (
+              <div className="bg-gray-50 p-3 rounded-xl border text-xs space-y-2">
+                <span className="font-bold text-gray-700 block">Chave Pix Copia e Cola:</span>
+                <input
+                  type="text"
+                  readOnly
+                  value={pixCopiaECola}
+                  className="w-full bg-white border rounded p-1.5 text-[10px] text-gray-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(pixCopiaECola);
+                    alert('Código Pix copiado!');
+                  }}
+                  className="w-full bg-amber-100 text-amber-900 font-bold py-1.5 rounded-lg text-xs"
+                >
+                  Copiar Código Pix
+                </button>
+              </div>
+            )}
 
             <div>
               <label className="block text-[11px] font-bold text-gray-600 mb-1">
@@ -3611,7 +3994,11 @@ export default function VilaMarketApp() {
                 disabled={carregando}
                 className="bg-floresta text-white font-bold py-2.5 rounded-xl text-xs"
               >
-                {carregando ? 'Creditando...' : 'Confirmar Pix'}
+                {carregando
+                  ? 'Processando...'
+                  : origemSaldoTransferencia === 'pix'
+                  ? 'Confirmar Pix'
+                  : 'Transferir Agora'}
               </button>
             </div>
           </div>
