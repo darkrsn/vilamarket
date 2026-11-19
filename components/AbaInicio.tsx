@@ -1,5 +1,7 @@
 'use client';
 
+import { useState } from 'react';
+
 interface AbaInicioProps {
   usuarioLogado: any;
   perfilDetalhes: any;
@@ -33,6 +35,8 @@ export default function AbaInicio({
   onAbrirPixDependente,
   onVerMural,
 }: AbaInicioProps) {
+  const [avisoExpandido, setAvisoExpandido] = useState<any | null>(null);
+
   const saldoTotalUnificado =
     Number(perfilDetalhes?.saldo_cashback ?? usuarioLogado?.saldo_cashback ?? 0) +
     Number(perfilDetalhes?.saldo_pre_pago ?? usuarioLogado?.saldo_pre_pago ?? 0);
@@ -197,7 +201,10 @@ export default function AbaInicio({
               </button>
             </div>
 
-            <div onClick={onVerMural} className="cursor-pointer space-y-1.5">
+            <div
+              onClick={() => setAvisoExpandido(avisosLista[0])}
+              className="cursor-pointer space-y-1.5"
+            >
               <div className="flex items-start justify-between gap-2">
                 <h4 className="font-bold text-xs text-grafite leading-snug">{avisosLista[0].titulo}</h4>
                 <span className="text-[10px] text-gray-500 shrink-0">
@@ -216,6 +223,57 @@ export default function AbaInicio({
               <p className="text-[11px] text-gray-700 line-clamp-2 leading-relaxed">{avisosLista[0].conteudo}</p>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* MODAL EXPANDIDO DO AVISO (FECHA AO CLICAR FORA) */}
+      {avisoExpandido && (
+        <div
+          onClick={() => setAvisoExpandido(null)}
+          className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4 overflow-y-auto"
+        >
+          <article
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white border border-gray-200 rounded-2xl max-w-md w-full overflow-hidden shadow-2xl my-auto"
+          >
+            <div className="p-3.5 border-b border-gray-100 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="w-7 h-7 rounded-full bg-floresta text-white flex items-center justify-center text-xs font-bold">
+                  VM
+                </span>
+                <div>
+                  <p className="text-xs font-bold text-grafite">Administração VilaMarket</p>
+                  <p className="text-[10px] text-gray-400">
+                    {new Date(avisoExpandido.criado_em).toLocaleDateString('pt-BR')}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAvisoExpandido(null)}
+                className="text-xs font-bold text-gray-500 hover:text-grafite px-2 py-1 rounded-lg bg-gray-100"
+              >
+                ✕
+              </button>
+            </div>
+
+            {avisoExpandido.imagem_url && (
+              <div className="w-full bg-gray-100">
+                <img
+                  src={avisoExpandido.imagem_url}
+                  alt={avisoExpandido.titulo}
+                  className="w-full h-auto max-h-[520px] object-contain mx-auto block"
+                />
+              </div>
+            )}
+
+            <div className="p-4 space-y-1.5">
+              <h3 className="font-bold text-sm text-grafite">{avisoExpandido.titulo}</h3>
+              <p className="text-xs text-gray-700 whitespace-pre-line leading-relaxed">
+                {avisoExpandido.conteudo}
+              </p>
+            </div>
+          </article>
         </div>
       )}
     </>
