@@ -248,6 +248,85 @@ export default function VilaMarketApp() {
   const [adminAvisoFotoFile, setAdminAvisoFotoFile] = useState<File | null>(null);
   const [adminAvisoFotoPreview, setAdminAvisoFotoPreview] = useState<string | null>(null);
 
+  // =========================================================================
+  // NAVEGAÇÃO COM HISTÓRICO E ENDEREÇO NA URL (BOTÃO VOLTAR SEGURO)
+  // =========================================================================
+  function navegarParaAba(
+    novaAba: 'login' | 'cadastro' | 'confirmar_wa' | 'esqueci_pin' | 'painel',
+    novaAbaInferior?: 'inicio' | 'mural' | 'classificados' | 'ajuda' | 'perfil' | 'admin'
+  ) {
+    setAba(novaAba);
+    const abaAlvo = novaAbaInferior || abaInferior;
+    if (novaAbaInferior) {
+      setAbaInferior(novaAbaInferior);
+    }
+
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams();
+      params.set('tela', novaAba);
+      if (novaAba === 'painel') {
+        params.set('aba', abaAlvo);
+      }
+
+      window.history.pushState(
+        { tela: novaAba, aba: abaAlvo },
+        '',
+        `?${params.toString()}`
+      );
+    }
+  }
+
+  function abrirModalComHistorico(
+    novoModal:
+      | 'selfie'
+      | 'pin'
+      | 'extrato'
+      | 'novo_dependente'
+      | 'gerenciar_dependente'
+      | 'pix_dependente'
+      | 'novo_anuncio'
+  ) {
+    setModalAtivo(novoModal);
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      params.set('modal', novoModal);
+      window.history.pushState(
+        { tela: aba, aba: abaInferior, modal: novoModal },
+        '',
+        `?${params.toString()}`
+      );
+    }
+  }
+
+  useEffect(() => {
+    function aoVoltarNoNavegador(event: PopStateEvent) {
+      if (modalAtivo) {
+        fecharCamera();
+        setModalAtivo(null);
+        return;
+      }
+
+      if (adminEditandoMorador) {
+        setAdminEditandoMorador(null);
+        setAdminFotoAmpliadaUrl(null);
+        return;
+      }
+
+      if (event.state?.tela) {
+        setAba(event.state.tela);
+        if (event.state.aba) {
+          setAbaInferior(event.state.aba);
+        }
+      } else if (usuarioLogado && abaInferior !== 'inicio') {
+        setAba('painel');
+        setAbaInferior('inicio');
+      }
+    }
+
+    window.addEventListener('popstate', aoVoltarNoNavegador);
+    return () => window.removeEventListener('popstate', aoVoltarNoNavegador);
+  }, [modalAtivo, adminEditandoMorador, usuarioLogado, abaInferior]);
+
   useEffect(() => {
     restaurarSessaoSalva();
     return () => pararAnaliseCamera();
@@ -599,8 +678,20 @@ export default function VilaMarketApp() {
         const sessao = JSON.parse(salvo);
         if (sessao?.usuario && sessao?.expiraEm && Date.now() < sessao.expiraEm) {
           setUsuarioLogado(sessao.usuario);
+
+          // Restaura também a aba da URL se existir
+          const params = new URLSearchParams(window.location.search);
+          const abaUrl = params.get('aba') as any;
+          const abasValidas = ['inicio', 'mural', 'classificados', 'ajuda', 'perfil', 'admin'];
+          const abaInicial = abasValidas.includes(abaUrl) ? abaUrl : 'inicio';
+
           setAba('painel');
-          setAbaInferior('inicio');
+          setAbaInferior(abaInicial);
+          window.history.replaceState(
+            { tela: 'painel', aba: abaInicial },
+            '',
+            `?tela=painel&aba=${abaInicial}`
+          );
         } else {
           localStorage.removeItem(CHAVE_STORAGE);
         }
@@ -997,8 +1088,7 @@ export default function VilaMarketApp() {
     if (data?.sucesso) {
       setUsuarioLogado(data);
       salvarSessaoNoNavegador(data);
-      setAba('painel');
-      setAbaInferior('inicio');
+      navegarParaAba('painel', 'inicio');
     } else {
       setMensagem({ tipo: 'erro', texto: data?.mensagem || 'Erro ao validar acesso.' });
     }
@@ -1079,7 +1169,7 @@ export default function VilaMarketApp() {
       tipo: 'sucesso',
       texto: 'Cadastro criado! Digite o código de 6 dígitos enviado para o seu WhatsApp.',
     });
-    setAba('confirmar_wa');
+    navegarParaAba('confirmar_wa');
   }
 
   async function confirmarCodigoCadastro(e: React.FormEvent) {
@@ -1109,15 +1199,14 @@ export default function VilaMarketApp() {
 
     if (loginError || !loginData?.sucesso) {
       setMensagem({ tipo: 'sucesso', texto: data.mensagem });
-      setAba('login');
+      navegarParaAba('login');
       return;
     }
 
     setUsuarioLogado(loginData);
     salvarSessaoNoNavegador(loginData);
     setMensagem(null);
-    setAba('painel');
-    setAbaInferior('inicio');
+    navegarParaAba('painel', 'inicio');
   }
 
   async function pedirCodigoResetPin() {
@@ -1160,7 +1249,7 @@ export default function VilaMarketApp() {
       setMensagem({ tipo: 'erro', texto: error?.message || data?.mensagem });
     } else {
       setMensagem({ tipo: 'sucesso', texto: data.mensagem });
-      setAba('login');
+      navegarParaAba('login');
     }
   }
 
@@ -1196,7 +1285,7 @@ export default function VilaMarketApp() {
 
   async function abrirModalSelfie() {
     setFotoCapturada(null);
-    setModalAtivo('selfie');
+    abrirModalComHistorico('selfie');
 
     if (perfilDetalhes?.selfie_url || usuarioLogado?.selfie_url) {
       setModoTrocaSelfie(false);
@@ -1330,7 +1419,7 @@ export default function VilaMarketApp() {
   }
 
   async function abrirModalExtrato() {
-    setModalAtivo('extrato');
+    abrirModalComHistorico('extrato');
     const idsFamilia = [usuarioLogado.perfil_id, ...dependentesLista.map((d) => d.id)];
     const { data } = await supabase
       .from('transacoes_carteira')
@@ -1409,6 +1498,16 @@ export default function VilaMarketApp() {
         caminhoSelfieDep = await enviarSelfieParaStoragePrivado(depSelfieBase64, novoDepId);
       }
 
+      // Restaura imediatamente a sessão do titular antes de inserir na tabela perfis
+      if (sessaoTitularAtual?.session) {
+        await supabase.auth.setSession({
+          access_token: sessaoTitularAtual.session.access_token,
+          refresh_token: sessaoTitularAtual.session.refresh_token,
+        });
+      }
+
+      const nomeFormatadoDep = formatarNomeTitleCase(depNome.trim());
+
       const { error: insertErr } = await supabase.from('perfis').insert({
         id: novoDepId,
         condominio_id: cId,
@@ -1417,7 +1516,7 @@ export default function VilaMarketApp() {
         unidade_formatada:
           perfilDetalhes?.unidade_formatada || usuarioLogado.unidade_formatada || usuarioLogado.unidade || '',
         titular_id: tId,
-        nome_completo: formatarNomeTitleCase(depNome.trim()),
+        nome_completo: nomeFormatadoDep,
         cpf: cpfDepLimpo,
         data_nascimento: depNascimento,
         role: 'dependente',
@@ -1434,11 +1533,27 @@ export default function VilaMarketApp() {
         p_pin_aberto: depPin,
       });
 
-      if (sessaoTitularAtual?.session) {
-        await supabase.auth.setSession({
-          access_token: sessaoTitularAtual.session.access_token,
-          refresh_token: sessaoTitularAtual.session.refresh_token,
-        });
+      // Atualiza imediatamente a lista local na tela do titular
+      setDependentesLista((prev) => [
+        ...prev,
+        {
+          id: novoDepId,
+          nome_completo: nomeFormatadoDep,
+          cpf: cpfDepLimpo,
+          role: 'dependente',
+          selfie_url: caminhoSelfieDep,
+          status_facial: caminhoSelfieDep ? 'ativo' : 'pendente',
+          status_cadastro: 'aprovado',
+          saldo_pre_pago: 0,
+          criado_em: new Date().toISOString(),
+        },
+      ]);
+
+      if (depSelfieBase64) {
+        setDependentesSelfiesMap((prev) => ({
+          ...prev,
+          [novoDepId]: depSelfieBase64,
+        }));
       }
 
       setDepNome('');
@@ -1572,7 +1687,7 @@ export default function VilaMarketApp() {
     setPixCopiaECola(
       `00020126580014BR.GOV.BCB.PIX0136vilamarket-pix-${dep.cpf}520400005303986540520.005802BR5910VILAMARKET6008CURITIBA62070503***6304ABCD`
     );
-    setModalAtivo('pix_dependente');
+    abrirModalComHistorico('pix_dependente');
   }
 
   async function confirmarRecargaPixDependente() {
@@ -1657,7 +1772,7 @@ export default function VilaMarketApp() {
       limparSessaoDoNavegador();
       setUsuarioLogado(null);
       setPin('');
-      setAba('login');
+      navegarParaAba('login');
     } catch {
       alert('Não foi possível processar automaticamente. Contate a administração da Vila.');
     } finally {
@@ -1787,14 +1902,14 @@ export default function VilaMarketApp() {
               <div className="flex justify-between text-xs pt-3 border-t">
                 <button
                   type="button"
-                  onClick={() => setAba('cadastro')}
+                  onClick={() => navegarParaAba('cadastro')}
                   className="text-floresta font-bold hover:underline"
                 >
                   Criar Cadastro de Morador
                 </button>
                 <button
                   type="button"
-                  onClick={() => setAba('esqueci_pin')}
+                  onClick={() => navegarParaAba('esqueci_pin')}
                   className="text-ambar font-semibold hover:underline"
                 >
                   Esqueci meu PIN
@@ -1960,7 +2075,7 @@ export default function VilaMarketApp() {
 
               <button
                 type="button"
-                onClick={() => setAba('login')}
+                onClick={() => navegarParaAba('login')}
                 className="w-full text-xs text-gray-500 hover:underline pt-2"
               >
                 Voltar para o Login
@@ -2046,7 +2161,7 @@ export default function VilaMarketApp() {
               </button>
               <button
                 type="button"
-                onClick={() => setAba('login')}
+                onClick={() => navegarParaAba('login')}
                 className="w-full text-xs text-gray-500 pt-1"
               >
                 Voltar
@@ -2158,7 +2273,7 @@ export default function VilaMarketApp() {
                           onClick={() => {
                             setDepSelfieBase64(null);
                             setAceiteLgpdDependente(false);
-                            setModalAtivo('novo_dependente');
+                            abrirModalComHistorico('novo_dependente');
                           }}
                           className="bg-floresta hover:bg-floresta-claro text-white text-xs font-bold px-3 py-2 rounded-xl transition"
                         >
@@ -2231,7 +2346,7 @@ export default function VilaMarketApp() {
                                     onClick={() => {
                                       setDepGerenciando(dep);
                                       setDepFotoNovaBase64(null);
-                                      setModalAtivo('gerenciar_dependente');
+                                      abrirModalComHistorico('gerenciar_dependente');
                                     }}
                                     className="bg-gray-200 hover:bg-gray-300 text-gray-800 text-[11px] font-bold px-2.5 py-1.5 rounded-xl transition"
                                   >
@@ -2319,7 +2434,7 @@ export default function VilaMarketApp() {
                       type="button"
                       onClick={() => {
                         setAnuncioWhatsapp(perfilDetalhes?.whatsapp || '');
-                        setModalAtivo('novo_anuncio');
+                        abrirModalComHistorico('novo_anuncio');
                       }}
                       className="bg-floresta hover:bg-floresta-claro text-white text-xs font-bold px-3 py-2 rounded-xl transition"
                     >
@@ -2375,7 +2490,7 @@ export default function VilaMarketApp() {
                           type="button"
                           onClick={() => {
                             setAnuncioWhatsapp(perfilDetalhes?.whatsapp || '');
-                            setModalAtivo('novo_anuncio');
+                            abrirModalComHistorico('novo_anuncio');
                           }}
                           className="text-xs font-bold text-floresta underline"
                         >
@@ -2598,7 +2713,7 @@ export default function VilaMarketApp() {
 
                     <button
                       type="button"
-                      onClick={() => setModalAtivo('pin')}
+                      onClick={() => abrirModalComHistorico('pin')}
                       className="w-full flex items-center justify-between p-3.5 bg-white hover:bg-emerald-50/60 border border-gray-200 rounded-xl transition text-left"
                     >
                       <div className="flex items-center gap-3">
@@ -2644,7 +2759,7 @@ export default function VilaMarketApp() {
                       setDependentesLista([]);
                       setDependentesSelfiesMap({});
                       setPin('');
-                      setAba('login');
+                      navegarParaAba('login');
                     }}
                     className="w-full py-3 text-xs font-bold text-gray-700 border border-gray-300 rounded-xl hover:bg-gray-50"
                   >
@@ -3863,7 +3978,6 @@ export default function VilaMarketApp() {
               Enviar Saldo • {dependenteSelecionado.nome_completo}
             </h3>
 
-            {/* Seletor da origem do saldo */}
             <div className="space-y-1.5">
               <label className="block text-[11px] font-bold text-gray-600">
                 De onde sairá o saldo?
@@ -4011,7 +4125,7 @@ export default function VilaMarketApp() {
           <div className="max-w-md mx-auto bg-white/95 backdrop-blur border border-gray-200 shadow-lg rounded-2xl px-1.5 py-1.5 flex items-center justify-between gap-0.5 pointer-events-auto">
             <button
               type="button"
-              onClick={() => setAbaInferior('inicio')}
+              onClick={() => navegarParaAba('painel', 'inicio')}
               className={`flex-1 min-h-[48px] px-1 py-1.5 rounded-xl flex flex-col items-center justify-center transition ${
                 abaInferior === 'inicio'
                   ? 'bg-emerald-50 text-floresta font-bold'
@@ -4024,7 +4138,7 @@ export default function VilaMarketApp() {
 
             <button
               type="button"
-              onClick={() => setAbaInferior('mural')}
+              onClick={() => navegarParaAba('painel', 'mural')}
               className={`flex-1 min-h-[48px] px-1 py-1.5 rounded-xl flex flex-col items-center justify-center transition ${
                 abaInferior === 'mural'
                   ? 'bg-emerald-50 text-floresta font-bold'
@@ -4038,7 +4152,7 @@ export default function VilaMarketApp() {
             {!ehMenorDeIdade && (
               <button
                 type="button"
-                onClick={() => setAbaInferior('classificados')}
+                onClick={() => navegarParaAba('painel', 'classificados')}
                 className={`flex-1 min-h-[48px] px-1 py-1.5 rounded-xl flex flex-col items-center justify-center transition ${
                   abaInferior === 'classificados'
                     ? 'bg-emerald-50 text-floresta font-bold'
@@ -4052,7 +4166,7 @@ export default function VilaMarketApp() {
 
             <button
               type="button"
-              onClick={() => setAbaInferior('ajuda')}
+              onClick={() => navegarParaAba('painel', 'ajuda')}
               className={`flex-1 min-h-[48px] px-1 py-1.5 rounded-xl flex flex-col items-center justify-center transition ${
                 abaInferior === 'ajuda'
                   ? 'bg-emerald-50 text-floresta font-bold'
@@ -4065,7 +4179,7 @@ export default function VilaMarketApp() {
 
             <button
               type="button"
-              onClick={() => setAbaInferior('perfil')}
+              onClick={() => navegarParaAba('painel', 'perfil')}
               className={`flex-1 min-h-[48px] px-1 py-1.5 rounded-xl flex flex-col items-center justify-center transition ${
                 abaInferior === 'perfil'
                   ? 'bg-emerald-50 text-floresta font-bold'
@@ -4079,7 +4193,7 @@ export default function VilaMarketApp() {
             {roleUsuario === 'admin' && (
               <button
                 type="button"
-                onClick={() => setAbaInferior('admin')}
+                onClick={() => navegarParaAba('painel', 'admin')}
                 className={`flex-1 min-h-[48px] px-1 py-1.5 rounded-xl flex flex-col items-center justify-center transition ${
                   abaInferior === 'admin'
                     ? 'bg-emerald-50 text-floresta font-bold'
