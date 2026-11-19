@@ -45,12 +45,16 @@ export default function ModaisDependentes({
   const [abrindoCameraGerenciar, setAbrindoCameraGerenciar] = useState(false);
 
   // Transferência / Pix
-  const [origemSaldo, setOrigemSaldo] = useState<'pre_pago' | 'cashback' | 'pix'>('pre_pago');
+  const [origemSaldo, setOrigemSaldo] = useState<'saldo_total' | 'pix'>('saldo_total');
   const [valorPix, setValorPix] = useState('20.00');
   const [pinConfirmacaoPix, setPinConfirmacaoPix] = useState('');
 
   const depDataCompleta = Boolean(depNascimento && depNascimento.split('-')[0]?.length === 4);
   const depMenorDe12 = depDataCompleta && calcularIdade(depNascimento) < 12;
+
+  const saldoTotalTitular =
+    Number(perfilDetalhes?.saldo_pre_pago ?? usuarioLogado?.saldo_pre_pago ?? 0) +
+    Number(perfilDetalhes?.saldo_cashback ?? usuarioLogado?.saldo_cashback ?? 0);
 
   async function cadastrarDependente(e: React.FormEvent) {
     e.preventDefault();
@@ -563,42 +567,33 @@ export default function ModaisDependentes({
 
           <div className="space-y-1.5">
             <label className="block text-[11px] font-bold text-gray-600">De onde sairá o saldo?</label>
-            <div className="grid grid-cols-3 gap-1.5">
+            <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
-                onClick={() => setOrigemSaldo('pre_pago')}
-                className={`p-2 rounded-xl text-[11px] font-bold border text-center ${
-                  origemSaldo === 'pre_pago' ? 'bg-floresta text-white border-floresta' : 'bg-gray-50 text-gray-700 border-gray-200'
+                onClick={() => setOrigemSaldo('saldo_total')}
+                className={`p-2.5 rounded-xl text-xs font-bold border text-center transition ${
+                  origemSaldo === 'saldo_total'
+                    ? 'bg-floresta text-white border-floresta'
+                    : 'bg-gray-50 text-gray-700 border-gray-200'
                 }`}
               >
-                Meu Pré-Pago
-                <span className="block text-[10px] font-normal opacity-90">
-                  R$ {Number(perfilDetalhes?.saldo_pre_pago ?? usuarioLogado.saldo_pre_pago ?? 0).toFixed(2)}
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setOrigemSaldo('cashback')}
-                className={`p-2 rounded-xl text-[11px] font-bold border text-center ${
-                  origemSaldo === 'cashback' ? 'bg-ambar text-white border-ambar' : 'bg-amber-50 text-amber-900 border-amber-200'
-                }`}
-              >
-                Meu Cashback
-                <span className="block text-[10px] font-normal opacity-90">
-                  R$ {Number(perfilDetalhes?.saldo_cashback ?? usuarioLogado.saldo_cashback ?? 0).toFixed(2)}
+                Meu Saldo
+                <span className="block text-[11px] font-normal opacity-90 mt-0.5">
+                  R$ {saldoTotalTitular.toFixed(2)}
                 </span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setOrigemSaldo('pix')}
-                className={`p-2 rounded-xl text-[11px] font-bold border text-center ${
-                  origemSaldo === 'pix' ? 'bg-emerald-700 text-white border-emerald-700' : 'bg-gray-50 text-gray-700 border-gray-200'
+                className={`p-2.5 rounded-xl text-xs font-bold border text-center transition ${
+                  origemSaldo === 'pix'
+                    ? 'bg-emerald-700 text-white border-emerald-700'
+                    : 'bg-gray-50 text-gray-700 border-gray-200'
                 }`}
               >
                 Novo Pix
-                <span className="block text-[10px] font-normal opacity-90">Recarga</span>
+                <span className="block text-[11px] font-normal opacity-90 mt-0.5">Recarga</span>
               </button>
             </div>
           </div>
