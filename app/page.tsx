@@ -23,7 +23,7 @@ const PASSOS_AJUDA = [
   },
   {
     titulo: '2. Totem ou Scan & Go no Celular',
-    texto: 'Você pode pagar no totem da loja ou escanear os produtos direto pelo celular na aba Estoque. Pagando via Pix você recebe 2% de cashback na hora.',
+    texto: 'Você pode pagar no totem da loja ou escanear os produtos direto pelo celular no Scan & Go. Pagando via Pix você recebe 2% de cashback na hora.',
   },
   {
     titulo: '3. Dependentes & Controle Familiar',
@@ -117,6 +117,7 @@ export default function VilaMarketApp() {
 
   useEffect(() => {
     const aoVoltarNoNavegador = (event: PopStateEvent) => {
+      if (abrirScanGoDireto) return setAbrirScanGoDireto(false);
       if (modalAtivo) return setModalAtivo(null);
       if (event.state?.tela) {
         setAba(event.state.tela);
@@ -128,7 +129,7 @@ export default function VilaMarketApp() {
     };
     window.addEventListener('popstate', aoVoltarNoNavegador);
     return () => window.removeEventListener('popstate', aoVoltarNoNavegador);
-  }, [modalAtivo, usuarioLogado, abaInferior]);
+  }, [abrirScanGoDireto, modalAtivo, usuarioLogado, abaInferior]);
 
   useEffect(() => {
     try {
@@ -324,10 +325,7 @@ export default function VilaMarketApp() {
                   dependentesSelfiesMap={dependentesSelfiesMap}
                   avisosLista={avisosLista}
                   onAbrirSelfie={() => setModalAtivo('selfie')}
-                  onAbrirScanGo={() => {
-                    setAbrirScanGoDireto(true);
-                    navegarParaAba('painel', 'estoque');
-                  }}
+                  onAbrirScanGo={() => setAbrirScanGoDireto(true)}
                   onAbrirNovoDependente={() => setModalAtivo('novo_dependente')}
                   onGerenciarDependente={(dep) => {
                     setDepGerenciando(dep);
@@ -341,7 +339,7 @@ export default function VilaMarketApp() {
                 />
               )}
 
-              {abaInferior === 'estoque' && (
+              {(abaInferior === 'estoque' || abrirScanGoDireto) && (
                 <AbaEstoqueScanGo
                   usuarioLogado={usuarioLogado}
                   perfilDetalhes={perfilDetalhes}
@@ -353,6 +351,7 @@ export default function VilaMarketApp() {
                   carrinho={carrinhoScanGo}
                   setCarrinho={setCarrinhoScanGo}
                   abrirScanGoDireto={abrirScanGoDireto}
+                  somenteModalScanGo={abaInferior !== 'estoque' && abrirScanGoDireto}
                   onFecharScanGoDireto={() => setAbrirScanGoDireto(false)}
                 />
               )}

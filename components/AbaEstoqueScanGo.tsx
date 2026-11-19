@@ -60,6 +60,7 @@ interface PropsAbaEstoque {
   carrinho: ItemCarrinhoScanGo[];
   setCarrinho: React.Dispatch<React.SetStateAction<ItemCarrinhoScanGo[]>>;
   abrirScanGoDireto?: boolean;
+  somenteModalScanGo?: boolean;
   onFecharScanGoDireto?: () => void;
 }
 
@@ -74,6 +75,7 @@ export default function AbaEstoqueScanGo({
   carrinho,
   setCarrinho,
   abrirScanGoDireto,
+  somenteModalScanGo,
   onFecharScanGoDireto,
 }: PropsAbaEstoque) {
   const [produtosLista, setProdutosLista] = useState<any[]>([]);
@@ -128,7 +130,6 @@ export default function AbaEstoqueScanGo({
   useEffect(() => {
     if (abrirScanGoDireto) {
       iniciarScannerScanGo();
-      if (onFecharScanGoDireto) onFecharScanGoDireto();
     }
   }, [abrirScanGoDireto]);
 
@@ -207,6 +208,13 @@ export default function AbaEstoqueScanGo({
       setScannerStream(null);
     }
     setScannerAtivo(false);
+  }
+
+  function fecharModalScanGo() {
+    pararScannerScanGo();
+    setCobrancaPendenteScanGo(null);
+    setModalInterno(null);
+    if (onFecharScanGoDireto) onFecharScanGoDireto();
   }
 
   function adicionarProdutoAoCarrinho(prod: any) {
@@ -303,8 +311,7 @@ export default function AbaEstoqueScanGo({
       if (res.status === 'pago') {
         setCarrinho([]);
         setPinCheckoutScanGo('');
-        pararScannerScanGo();
-        setModalInterno(null);
+        fecharModalScanGo();
         await Promise.all([onAtualizarDashboard(), carregarProdutosEstoque()]);
         onMensagem({
           tipo: 'sucesso',
@@ -341,11 +348,9 @@ export default function AbaEstoqueScanGo({
         return;
       }
 
-      setCobrancaPendenteScanGo(null);
       setCarrinho([]);
       setPinCheckoutScanGo('');
-      pararScannerScanGo();
-      setModalInterno(null);
+      fecharModalScanGo();
       await Promise.all([onAtualizarDashboard(), carregarProdutosEstoque()]);
       onMensagem({ tipo: 'sucesso', texto: `✅ ${res.mensagem}` });
     } catch (err: any) {
@@ -513,380 +518,390 @@ export default function AbaEstoqueScanGo({
   const qtdItensCarrinho = carrinho.reduce((acc, item) => acc + item.quantidade, 0);
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="text-lg font-bold text-grafite">Estoque & Loja</h2>
-        <button
-          type="button"
-          onClick={iniciarScannerScanGo}
-          className="bg-floresta hover:bg-floresta-claro text-white text-xs font-bold px-3 py-2 rounded-xl flex items-center gap-1.5 shadow-sm"
-        >
-          <span>📷 Scan & Go</span>
-          {qtdItensCarrinho > 0 && (
-            <span className="bg-ambar text-white text-[10px] px-1.5 py-0.5 rounded-full">
-              {qtdItensCarrinho}
-            </span>
-          )}
-        </button>
-      </div>
-
-      {roleUsuario === 'admin' && (
-        <div className="grid grid-cols-2 gap-1.5 bg-gray-100 p-1 rounded-xl">
-          <button
-            type="button"
-            onClick={() => setModoEstoqueAdmin('loja')}
-            className={`py-2 text-xs font-bold rounded-lg transition ${
-              modoEstoqueAdmin === 'loja' ? 'bg-floresta text-white' : 'text-gray-600'
-            }`}
-          >
-            🛒 Visão Morador
-          </button>
-          <button
-            type="button"
-            onClick={() => setModoEstoqueAdmin('gestao')}
-            className={`py-2 text-xs font-bold rounded-lg transition ${
-              modoEstoqueAdmin === 'gestao' ? 'bg-floresta text-white' : 'text-gray-600'
-            }`}
-          >
-            📦 Gestão Estoque
-          </button>
-        </div>
-      )}
-
-      {(roleUsuario !== 'admin' || modoEstoqueAdmin === 'loja') && (
-        <div className="space-y-3">
-          {ofertasRelampago.length > 0 && (
-            <div className="bg-amber-50 border border-amber-200 p-3 rounded-2xl space-y-2">
-              <p className="text-xs font-extrabold text-amber-900 uppercase">
-                ⚡ Ofertas Relâmpago & Validade Próxima
-              </p>
-              <div className="flex gap-2 overflow-x-auto pb-1">
-                {ofertasRelampago.map((of) => (
-                  <div
-                    key={of.id}
-                    className="min-w-[165px] bg-white border border-amber-200 rounded-xl p-2.5 flex flex-col justify-between shrink-0"
-                  >
-                    <div>
-                      <span className="text-[9px] font-bold bg-red-100 text-red-700 px-1.5 py-0.5 rounded">
-                        OFERTA HOJE
-                      </span>
-                      <p className="text-xs font-bold text-grafite mt-1 line-clamp-2">{of.nome}</p>
-                      <p className="text-[10px] text-gray-400 line-through">R$ {Number(of.preco).toFixed(2)}</p>
-                      <p className="text-sm font-extrabold text-floresta">
-                        R$ {Number(of.preco_promocional || of.preco).toFixed(2)}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        adicionarProdutoAoCarrinho(of);
-                        setModalInterno('scan_go');
-                      }}
-                      className="mt-2 w-full bg-floresta text-white text-[11px] font-bold py-1.5 rounded-lg"
-                    >
-                      + Pegar Oferta
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="flex gap-2">
-            <input
-              type="text"
-              placeholder="Buscar produto ou código..."
-              value={buscaLoja}
-              onChange={(e) => setBuscaLoja(e.target.value)}
-              className="flex-1 p-2 border rounded-xl text-xs bg-gray-50 focus:bg-white outline-none"
-            />
+    <div className={somenteModalScanGo ? '' : 'space-y-4'}>
+      {!somenteModalScanGo && (
+        <>
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-lg font-bold text-grafite">Estoque & Loja</h2>
             <button
               type="button"
-              onClick={() => {
-                setSugestaoTipo('sugestao');
-                setModalInterno('sugerir_produto');
-              }}
-              className="px-3 py-2 rounded-xl text-[11px] font-bold bg-amber-100 text-amber-900 shrink-0"
+              onClick={iniciarScannerScanGo}
+              className="bg-floresta hover:bg-floresta-claro text-white text-xs font-bold px-3 py-2 rounded-xl flex items-center gap-1.5 shadow-sm"
             >
-              💡 Faltou algo?
+              <span>📷 Scan & Go</span>
+              {qtdItensCarrinho > 0 && (
+                <span className="bg-ambar text-white text-[10px] px-1.5 py-0.5 rounded-full">
+                  {qtdItensCarrinho}
+                </span>
+              )}
             </button>
           </div>
 
-          <div className="flex gap-1.5 overflow-x-auto pb-1">
-            {CATEGORIAS_LOJA.map((cat) => (
+          {roleUsuario === 'admin' && (
+            <div className="grid grid-cols-2 gap-1.5 bg-gray-100 p-1 rounded-xl">
               <button
-                key={cat}
                 type="button"
-                onClick={() => setFiltroCategoriaLoja(cat)}
-                className={`px-3 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap transition ${
-                  filtroCategoriaLoja === cat
-                    ? 'bg-floresta text-white'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                onClick={() => setModoEstoqueAdmin('loja')}
+                className={`py-2 text-xs font-bold rounded-lg transition ${
+                  modoEstoqueAdmin === 'loja' ? 'bg-floresta text-white' : 'text-gray-600'
                 }`}
               >
-                {cat}
+                🛒 Visão Morador
               </button>
-            ))}
-          </div>
-
-          {produtosFiltrados.length === 0 ? (
-            <div className="bg-gray-50 border border-dashed border-gray-200 p-6 rounded-xl text-center space-y-2">
-              <p className="text-xs text-gray-500">Nenhum produto encontrado nesta categoria.</p>
               <button
                 type="button"
-                onClick={() => {
-                  setSugestaoTipo('sugestao');
-                  setModalInterno('sugerir_produto');
-                }}
-                className="text-xs font-bold text-floresta underline"
+                onClick={() => setModoEstoqueAdmin('gestao')}
+                className={`py-2 text-xs font-bold rounded-lg transition ${
+                  modoEstoqueAdmin === 'gestao' ? 'bg-floresta text-white' : 'text-gray-600'
+                }`}
               >
-                Pedir este produto para o minimercado
+                📦 Gestão Estoque
               </button>
             </div>
-          ) : (
-            <div className="space-y-2.5 max-h-[440px] overflow-y-auto pr-0.5">
-              {produtosFiltrados.map((prod) => {
-                const esgotado = prod.quantidade_estoque <= 0;
-                const baixo = !esgotado && prod.quantidade_estoque <= (prod.estoque_minimo || 3);
-                const precoFinal =
-                  prod.oferta_relampago && prod.preco_promocional && Number(prod.preco_promocional) > 0
-                    ? Number(prod.preco_promocional)
-                    : Number(prod.preco);
+          )}
 
-                return (
-                  <div
-                    key={prod.id}
-                    className="bg-white border border-gray-200 p-3 rounded-xl flex items-center justify-between gap-2.5"
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      {prod.imagem_url ? (
-                        <img
-                          src={prod.imagem_url}
-                          alt={prod.nome}
-                          className="w-12 h-12 rounded-lg object-cover border shrink-0"
-                        />
-                      ) : (
-                        <div className="w-12 h-12 rounded-lg bg-gray-100 flex items-center justify-center text-lg shrink-0">
-                          🛒
+          {(roleUsuario !== 'admin' || modoEstoqueAdmin === 'loja') && (
+            <div className="space-y-3">
+              {ofertasRelampago.length > 0 && (
+                <div className="bg-amber-50 border border-amber-200 p-3 rounded-2xl space-y-2">
+                  <p className="text-xs font-extrabold text-amber-900 uppercase">
+                    ⚡ Ofertas Relâmpago & Validade Próxima
+                  </p>
+                  <div className="flex gap-2 overflow-x-auto pb-1">
+                    {ofertasRelampago.map((of) => (
+                      <div
+                        key={of.id}
+                        className="min-w-[165px] bg-white border border-amber-200 rounded-xl p-2.5 flex flex-col justify-between shrink-0"
+                      >
+                        <div>
+                          <span className="text-[9px] font-bold bg-red-100 text-red-700 px-1.5 py-0.5 rounded">
+                            OFERTA HOJE
+                          </span>
+                          <p className="text-xs font-bold text-grafite mt-1 line-clamp-2">{of.nome}</p>
+                          <p className="text-[10px] text-gray-400 line-through">R$ {Number(of.preco).toFixed(2)}</p>
+                          <p className="text-sm font-extrabold text-floresta">
+                            R$ {Number(of.preco_promocional || of.preco).toFixed(2)}
+                          </p>
                         </div>
-                      )}
-                      <div className="min-w-0">
-                        <p className="text-xs font-bold text-grafite truncate">{prod.nome}</p>
-                        <p className="text-[10px] text-gray-400">{prod.categoria}</p>
-                        <span
-                          className={`inline-block mt-1 text-[9px] font-bold px-2 py-0.5 rounded-full ${
-                            esgotado
-                              ? 'bg-red-100 text-red-700'
-                              : baixo
-                              ? 'bg-amber-100 text-amber-800'
-                              : 'bg-emerald-100 text-emerald-800'
-                          }`}
-                        >
-                          {esgotado
-                            ? 'Esgotado'
-                            : baixo
-                            ? `Últimas ${prod.quantidade_estoque} un.`
-                            : `Em estoque: ${prod.quantidade_estoque} un.`}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="text-right shrink-0 space-y-1">
-                      {prod.oferta_relampago && prod.preco_promocional && (
-                        <p className="text-[10px] text-gray-400 line-through">
-                          R$ {Number(prod.preco).toFixed(2)}
-                        </p>
-                      )}
-                      <p className="text-sm font-extrabold text-floresta">R$ {precoFinal.toFixed(2)}</p>
-                      {esgotado ? (
                         <button
                           type="button"
                           onClick={() => {
-                            setSugestaoTipo('ruptura');
-                            setSugestaoNome(prod.nome);
-                            setModalInterno('sugerir_produto');
+                            adicionarProdutoAoCarrinho(of);
+                            setModalInterno('scan_go');
                           }}
-                          className="text-[10px] font-bold text-amber-800 underline"
+                          className="mt-2 w-full bg-floresta text-white text-[11px] font-bold py-1.5 rounded-lg"
                         >
-                          Avisar falta
+                          + Pegar Oferta
                         </button>
-                      ) : (
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Buscar produto ou código..."
+                  value={buscaLoja}
+                  onChange={(e) => setBuscaLoja(e.target.value)}
+                  className="flex-1 p-2 border rounded-xl text-xs bg-gray-50 focus:bg-white outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSugestaoTipo('sugestao');
+                    setModalInterno('sugerir_produto');
+                  }}
+                  className="px-3 py-2 rounded-xl text-[11px] font-bold bg-amber-100 text-amber-900 shrink-0"
+                >
+                  💡 Faltou algo?
+                </button>
+              </div>
+
+              <div className="flex gap-1.5 overflow-x-auto pb-1">
+                {CATEGORIAS_LOJA.map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setFiltroCategoriaLoja(cat)}
+                    className={`px-3 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap transition ${
+                      filtroCategoriaLoja === cat
+                        ? 'bg-floresta text-white'
+                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+
+              {produtosFiltrados.length === 0 ? (
+                <div className="bg-gray-50 border border-dashed border-gray-200 p-6 rounded-xl text-center space-y-2">
+                  <p className="text-xs text-gray-500">Nenhum produto encontrado nesta categoria.</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSugestaoTipo('sugestao');
+                      setModalInterno('sugerir_produto');
+                    }}
+                    className="text-xs font-bold text-floresta underline"
+                  >
+                    Pedir este produto para o minimercado
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2.5 max-h-[440px] overflow-y-auto pr-0.5">
+                  {produtosFiltrados.map((prod) => {
+                    const esgotado = prod.quantidade_estoque <= 0;
+                    const baixo = !esgotado && prod.quantidade_estoque <= (prod.estoque_minimo || 3);
+                    const precoFinal =
+                      prod.oferta_relampago && prod.preco_promocional && Number(prod.preco_promocional) > 0
+                        ? Number(prod.preco_promocional)
+                        : Number(prod.preco);
+
+                    return (
+                      <div
+                        key={prod.id}
+                        className="bg-white border border-gray-200 p-3 rounded-xl flex items-center justify-between gap-2.5"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          {prod.imagem_url ? (
+                            <img
+                              src={prod.imagem_url}
+                              alt={prod.nome}
+                              className="w-12 h-12 rounded-lg object-cover border shrink-0"
+                            />
+                          ) : (
+                            <div className="w-12 h-12 rounded-lg bg-gray-100 flex items-center justify-center text-lg shrink-0">
+                              🛒
+                            </div>
+                          )}
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold text-grafite truncate">{prod.nome}</p>
+                            <p className="text-[10px] text-gray-400">{prod.categoria}</p>
+                            <span
+                              className={`inline-block mt-1 text-[9px] font-bold px-2 py-0.5 rounded-full ${
+                                esgotado
+                                  ? 'bg-red-100 text-red-700'
+                                  : baixo
+                                  ? 'bg-amber-100 text-amber-800'
+                                  : 'bg-emerald-100 text-emerald-800'
+                              }`}
+                            >
+                              {esgotado
+                                ? 'Esgotado'
+                                : baixo
+                                ? `Últimas ${prod.quantidade_estoque} un.`
+                                : `Em estoque: ${prod.quantidade_estoque} un.`}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="text-right shrink-0 space-y-1">
+                          {prod.oferta_relampago && prod.preco_promocional && (
+                            <p className="text-[10px] text-gray-400 line-through">
+                              R$ {Number(prod.preco).toFixed(2)}
+                            </p>
+                          )}
+                          <p className="text-sm font-extrabold text-floresta">R$ {precoFinal.toFixed(2)}</p>
+                          {esgotado ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSugestaoTipo('ruptura');
+                                setSugestaoNome(prod.nome);
+                                setModalInterno('sugerir_produto');
+                              }}
+                              className="text-[10px] font-bold text-amber-800 underline"
+                            >
+                              Avisar falta
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => adicionarProdutoAoCarrinho(prod)}
+                              className="bg-emerald-50 hover:bg-emerald-100 text-floresta border border-emerald-200 text-[11px] font-bold px-2.5 py-1 rounded-lg"
+                            >
+                              + Cesta
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {roleUsuario === 'admin' && modoEstoqueAdmin === 'gestao' && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="bg-gray-50 border border-gray-200 p-2.5 rounded-xl">
+                  <span className="text-[10px] text-gray-500 font-bold uppercase">Total SKUs</span>
+                  <p className="text-lg font-extrabold text-grafite">{produtosLista.length}</p>
+                </div>
+                <div className="bg-amber-50 border border-amber-200 p-2.5 rounded-xl">
+                  <span className="text-[10px] text-amber-800 font-bold uppercase">Estoque Baixo</span>
+                  <p className="text-lg font-extrabold text-amber-900">{produtosEstoqueBaixo.length}</p>
+                </div>
+                <div className="bg-emerald-50 border border-emerald-200 p-2.5 rounded-xl">
+                  <span className="text-[10px] text-emerald-800 font-bold uppercase">Pedidos Vila</span>
+                  <p className="text-lg font-extrabold text-floresta">
+                    {sugestoesListaAdmin.filter((s) => s.status === 'pendente').length}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Filtrar item no estoque..."
+                  value={buscaLoja}
+                  onChange={(e) => setBuscaLoja(e.target.value)}
+                  className="flex-1 p-2 border rounded-xl text-xs"
+                />
+                <button
+                  type="button"
+                  onClick={() => abrirModalProdutoAdmin()}
+                  className="bg-floresta text-white text-xs font-bold px-3 py-2 rounded-xl shrink-0"
+                >
+                  + Novo Produto
+                </button>
+              </div>
+
+              <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-0.5">
+                {produtosFiltrados.map((prod) => {
+                  const critico = prod.quantidade_estoque <= (prod.estoque_minimo || 3);
+                  return (
+                    <div
+                      key={prod.id}
+                      className={`p-3 rounded-xl border text-xs space-y-2 ${
+                        critico ? 'bg-amber-50/70 border-amber-300' : 'bg-white border-gray-200'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <p className="font-bold text-grafite truncate">{prod.nome}</p>
+                            {prod.oferta_relampago && (
+                              <span className="text-[9px] font-bold bg-red-100 text-red-700 px-1.5 py-0.5 rounded">
+                                OFERTA
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-gray-500">
+                            EAN: {prod.codigo_barras || 'S/N'} • Preço: R$ {Number(prod.preco).toFixed(2)}
+                          </p>
+                        </div>
+
+                        <span
+                          className={`text-xs font-extrabold px-2.5 py-1 rounded-lg shrink-0 ${
+                            prod.quantidade_estoque === 0
+                              ? 'bg-red-100 text-red-700'
+                              : critico
+                              ? 'bg-amber-200 text-amber-950'
+                              : 'bg-emerald-100 text-emerald-900'
+                          }`}
+                        >
+                          {prod.quantidade_estoque} un.
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-4 gap-1.5 pt-1">
                         <button
                           type="button"
-                          onClick={() => adicionarProdutoAoCarrinho(prod)}
-                          className="bg-emerald-50 hover:bg-emerald-100 text-floresta border border-emerald-200 text-[11px] font-bold px-2.5 py-1 rounded-lg"
+                          onClick={() => adminMovimentarEstoqueRapido(prod.id, 'entrada', 1, 'Reposição rápida (+1)')}
+                          className="py-1.5 rounded-lg font-bold text-[11px] bg-emerald-600 text-white"
                         >
-                          + Cesta
+                          +1 Un.
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => adminMovimentarEstoqueRapido(prod.id, 'entrada', 12, 'Entrada caixa (+12)')}
+                          className="py-1.5 rounded-lg font-bold text-[11px] bg-emerald-100 text-emerald-900"
+                        >
+                          +12 Cx
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            adminMovimentarEstoqueRapido(prod.id, 'perda_validade', 1, 'Baixa perda/ajuste (-1)')
+                          }
+                          className="py-1.5 rounded-lg font-bold text-[11px] bg-red-100 text-red-700"
+                        >
+                          -1 Perda
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => abrirModalProdutoAdmin(prod)}
+                          className="py-1.5 rounded-lg font-bold text-[11px] bg-gray-100 text-grafite"
+                        >
+                          Editar
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {sugestoesListaAdmin.length > 0 && (
+                <div className="pt-3 border-t border-gray-200 space-y-2">
+                  <h3 className="text-xs font-bold text-grafite uppercase">
+                    Pedidos & Avisos de Falta dos Moradores
+                  </h3>
+                  {sugestoesListaAdmin.map((sug) => (
+                    <div
+                      key={sug.id}
+                      className="p-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs flex items-center justify-between gap-2"
+                    >
+                      <div className="min-w-0">
+                        <span
+                          className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase ${
+                            sug.tipo === 'ruptura' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'
+                          }`}
+                        >
+                          {sug.tipo === 'ruptura' ? 'Faltou na loja' : 'Sugestão'}
+                        </span>
+                        <p className="font-bold text-grafite truncate mt-0.5">{sug.nome_produto}</p>
+                        <p className="text-[10px] text-gray-500 truncate">
+                          {sug.perfis?.nome_completo || 'Morador'} • {sug.detalhes}
+                        </p>
+                      </div>
+                      {sug.status === 'pendente' ? (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            await supabase.from('sugestoes_produtos').update({ status: 'atendido' }).eq('id', sug.id);
+                            await carregarSugestoesAdmin();
+                          }}
+                          className="bg-floresta text-white text-[10px] font-bold px-2.5 py-1.5 rounded-lg shrink-0"
+                        >
+                          Atender
+                        </button>
+                      ) : (
+                        <span className="text-[10px] font-bold text-emerald-700 shrink-0">✓ Atendido</span>
                       )}
                     </div>
-                  </div>
-                );
-              })}
+                  ))}
+                </div>
+              )}
             </div>
           )}
-        </div>
+        </>
       )}
 
-      {roleUsuario === 'admin' && modoEstoqueAdmin === 'gestao' && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-3 gap-2 text-center">
-            <div className="bg-gray-50 border border-gray-200 p-2.5 rounded-xl">
-              <span className="text-[10px] text-gray-500 font-bold uppercase">Total SKUs</span>
-              <p className="text-lg font-extrabold text-grafite">{produtosLista.length}</p>
-            </div>
-            <div className="bg-amber-50 border border-amber-200 p-2.5 rounded-xl">
-              <span className="text-[10px] text-amber-800 font-bold uppercase">Estoque Baixo</span>
-              <p className="text-lg font-extrabold text-amber-900">{produtosEstoqueBaixo.length}</p>
-            </div>
-            <div className="bg-emerald-50 border border-emerald-200 p-2.5 rounded-xl">
-              <span className="text-[10px] text-emerald-800 font-bold uppercase">Pedidos Vila</span>
-              <p className="text-lg font-extrabold text-floresta">
-                {sugestoesListaAdmin.filter((s) => s.status === 'pendente').length}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex gap-2">
-            <input
-              type="text"
-              placeholder="Filtrar item no estoque..."
-              value={buscaLoja}
-              onChange={(e) => setBuscaLoja(e.target.value)}
-              className="flex-1 p-2 border rounded-xl text-xs"
-            />
-            <button
-              type="button"
-              onClick={() => abrirModalProdutoAdmin()}
-              className="bg-floresta text-white text-xs font-bold px-3 py-2 rounded-xl shrink-0"
-            >
-              + Novo Produto
-            </button>
-          </div>
-
-          <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-0.5">
-            {produtosFiltrados.map((prod) => {
-              const critico = prod.quantidade_estoque <= (prod.estoque_minimo || 3);
-              return (
-                <div
-                  key={prod.id}
-                  className={`p-3 rounded-xl border text-xs space-y-2 ${
-                    critico ? 'bg-amber-50/70 border-amber-300' : 'bg-white border-gray-200'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <p className="font-bold text-grafite truncate">{prod.nome}</p>
-                        {prod.oferta_relampago && (
-                          <span className="text-[9px] font-bold bg-red-100 text-red-700 px-1.5 py-0.5 rounded">
-                            OFERTA
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[10px] text-gray-500">
-                        EAN: {prod.codigo_barras || 'S/N'} • Preço: R$ {Number(prod.preco).toFixed(2)}
-                      </p>
-                    </div>
-
-                    <span
-                      className={`text-xs font-extrabold px-2.5 py-1 rounded-lg shrink-0 ${
-                        prod.quantidade_estoque === 0
-                          ? 'bg-red-100 text-red-700'
-                          : critico
-                          ? 'bg-amber-200 text-amber-950'
-                          : 'bg-emerald-100 text-emerald-900'
-                      }`}
-                    >
-                      {prod.quantidade_estoque} un.
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-4 gap-1.5 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => adminMovimentarEstoqueRapido(prod.id, 'entrada', 1, 'Reposição rápida (+1)')}
-                      className="py-1.5 rounded-lg font-bold text-[11px] bg-emerald-600 text-white"
-                    >
-                      +1 Un.
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => adminMovimentarEstoqueRapido(prod.id, 'entrada', 12, 'Entrada caixa (+12)')}
-                      className="py-1.5 rounded-lg font-bold text-[11px] bg-emerald-100 text-emerald-900"
-                    >
-                      +12 Cx
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        adminMovimentarEstoqueRapido(prod.id, 'perda_validade', 1, 'Baixa perda/ajuste (-1)')
-                      }
-                      className="py-1.5 rounded-lg font-bold text-[11px] bg-red-100 text-red-700"
-                    >
-                      -1 Perda
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => abrirModalProdutoAdmin(prod)}
-                      className="py-1.5 rounded-lg font-bold text-[11px] bg-gray-100 text-grafite"
-                    >
-                      Editar
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {sugestoesListaAdmin.length > 0 && (
-            <div className="pt-3 border-t border-gray-200 space-y-2">
-              <h3 className="text-xs font-bold text-grafite uppercase">
-                Pedidos & Avisos de Falta dos Moradores
-              </h3>
-              {sugestoesListaAdmin.map((sug) => (
-                <div
-                  key={sug.id}
-                  className="p-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs flex items-center justify-between gap-2"
-                >
-                  <div className="min-w-0">
-                    <span
-                      className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase ${
-                        sug.tipo === 'ruptura' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'
-                      }`}
-                    >
-                      {sug.tipo === 'ruptura' ? 'Faltou na loja' : 'Sugestão'}
-                    </span>
-                    <p className="font-bold text-grafite truncate mt-0.5">{sug.nome_produto}</p>
-                    <p className="text-[10px] text-gray-500 truncate">
-                      {sug.perfis?.nome_completo || 'Morador'} • {sug.detalhes}
-                    </p>
-                  </div>
-                  {sug.status === 'pendente' ? (
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        await supabase.from('sugestoes_produtos').update({ status: 'atendido' }).eq('id', sug.id);
-                        await carregarSugestoesAdmin();
-                      }}
-                      className="bg-floresta text-white text-[10px] font-bold px-2.5 py-1.5 rounded-lg shrink-0"
-                    >
-                      Atender
-                    </button>
-                  ) : (
-                    <span className="text-[10px] font-bold text-emerald-700 shrink-0">✓ Atendido</span>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* MODAL SCAN & GO */}
+      {/* MODAL SCAN & GO (FECHA AO CLICAR FORA OU EM FECHAR) */}
       {modalInterno === 'scan_go' && (
-        <div className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-3 my-auto">
+        <div
+          onClick={fecharModalScanGo}
+          className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4 overflow-y-auto"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-3 my-auto"
+          >
             <div className="flex items-center justify-between">
               <h3 className="font-bold text-base text-grafite">📱 Scan & Go • VilaMarket</h3>
               <span className="text-[11px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
@@ -1065,11 +1080,7 @@ export default function AbaEstoqueScanGo({
 
             <button
               type="button"
-              onClick={() => {
-                pararScannerScanGo();
-                setCobrancaPendenteScanGo(null);
-                setModalInterno(null);
-              }}
+              onClick={fecharModalScanGo}
               className="w-full text-xs text-gray-500 py-1"
             >
               Fechar
@@ -1080,8 +1091,15 @@ export default function AbaEstoqueScanGo({
 
       {/* MODAL SUGERIR PRODUTO */}
       {modalInterno === 'sugerir_produto' && (
-        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
-          <form onSubmit={enviarSugestaoOuRuptura} className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-3">
+        <div
+          onClick={() => setModalInterno(null)}
+          className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4"
+        >
+          <form
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={enviarSugestaoOuRuptura}
+            className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-3"
+          >
             <h3 className="font-bold text-base text-grafite">Faltou algo na loja?</h3>
             <div className="grid grid-cols-2 gap-2">
               <button
@@ -1138,8 +1156,15 @@ export default function AbaEstoqueScanGo({
 
       {/* MODAL ADMIN: PRODUTO */}
       {modalInterno === 'novo_produto_admin' && (
-        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 overflow-y-auto">
-          <form onSubmit={salvarProdutoEstoqueAdmin} className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-2.5 my-auto">
+        <div
+          onClick={() => setModalInterno(null)}
+          className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 overflow-y-auto"
+        >
+          <form
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={salvarProdutoEstoqueAdmin}
+            className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-2.5 my-auto"
+          >
             <h3 className="font-bold text-base text-grafite">
               {prodEditId ? 'Editar Produto do Estoque' : 'Cadastrar Produto no Estoque'}
             </h3>
