@@ -1,59 +1,141 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
-import { calcularIdade } from '@/lib/formatters';
-import AuthTelas from '@/components/AuthTelas';
-import ModaisDependentes from '@/components/ModaisDependentes';
-import ModaisPerfil from '@/components/ModaisPerfil';
-import AbaMuralClassificados from '@/components/AbaMuralClassificados';
-import AbaAdmin from '@/components/AbaAdmin';
+import AbaEstoqueScanGo from '@/components/AbaEstoqueScanGo';
 
 const TEMPO_SESSAO_MS = 7 * 24 * 60 * 60 * 1000;
 const CHAVE_STORAGE = 'vilamarket_sessao_v1';
 
+interface StatusQualidadeFoto {
+  aprovada: boolean;
+  luzOk: boolean;
+  detalhesOk: boolean;
+  enquadramentoOk: boolean;
+  mensagem: string;
+}
+
+function formatarNomeTitleCase(valor: string): string {
+  const excecoes = new Set(['da', 'de', 'do', 'das', 'dos', 'e']);
+  return valor
+    .toLowerCase()
+    .split(' ')
+    .map((palavra, indice) => {
+      if (!palavra) return '';
+      if (indice > 0 && excecoes.has(palavra)) return palavra;
+      return palavra.charAt(0).toUpperCase() + palavra.slice(1);
+    })
+    .join(' ');
+}
+
+function formatarCPFVisual(valor: string): string {
+  const apenasNumeros = valor.replace(/\D/g, '').slice(0, 11);
+  return apenasNumeros
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+}
+
 export default function VilaMarketApp() {
   const [aba, setAba] = useState<'login' | 'cadastro' | 'confirmar_wa' | 'esqueci_pin' | 'painel'>('login');
-  const [abaInferior, setAbaInferior] = useState<
-    'inicio' | 'mural' | 'classificados' | 'ajuda' | 'perfil' | 'admin'
-  >('inicio');
+  const [abaInferior, setAbaInferior] = useState<'inicio' | 'estoque' | 'mural' | 'ajuda' | 'perfil' | 'admin'>('inicio');
+  const [unidades, setUnidades] = useState<any[]>([]);
   const [condominioId, setCondominioId] = useState<string>('');
   const [mensagem, setMensagem] = useState<{ tipo: 'erro' | 'sucesso'; texto: string } | null>(null);
   const [carregando, setCarregando] = useState(false);
   const [verificandoSessao, setVerificandoSessao] = useState(true);
 
-  // Usuário Logado
+  // Dados Login & Usuário Logado
+  const [cpf, setCpf] = useState('');
+  const [pin, setPin] = useState('');
   const [usuarioLogado, setUsuarioLogado] = useState<any>(null);
   const [perfilDetalhes, setPerfilDetalhes] = useState<any>(null);
   const [selfieTemporariaUrl, setSelfieTemporariaUrl] = useState<string | null>(null);
 
+  // Dados Cadastro
+  const [nome, setNome] = useState('');
+  const [whatsapp, setWhatsapp] = useState('');
+  const [dataNasc, setDataNasc] = useState('');
+  const [ruaSelecionada, setRuaSelecionada] = useState('Rua Sargento Lafayette');
+  const [tipoUnidade, setTipoUnidade] = useState<'bloco' | 'casa'>('bloco');
+  const [unidadeId, setUnidadeId] = useState('');
+  const [complementoApto, setComplementoApto] = useState('');
+  const [aceiteLgpdTitular, setAceiteLgpdTitular] = useState(false);
+
+  // Código WhatsApp
+  const [codigoWa, setCodigoWa] = useState('');
+  const [novoPin, setNovoPin] = useState('');
+
   // Modais
   const [modalAtivo, setModalAtivo] = useState<
-    | null
-    | 'selfie'
-    | 'pin'
-    | 'extrato'
-    | 'novo_dependente'
-    | 'gerenciar_dependente'
-    | 'pix_dependente'
-    | 'novo_anuncio'
+    null | 'selfie' | 'pin' | 'extrato' | 'novo_dependente' | 'pix_dependente'
   >(null);
 
-  // Listas
+  // Carrinho global do Scan & Go (mantém contador na barra inferior)
+  const [carrinhoScanGo, setCarrinhoScanGo] = useState<any[]>([]);
+  const [abrirScanGoDireto, setAbrirScanGoDireto] = useState(false);
+
+  // Câmera & Selfie
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const intervaloAnaliseRef = useRef<NodeJS.Timeout | null>(null);
+  const [streamCamera, setStreamCamera] = useState<MediaStream | null>(null);
+  const [fotoCapturada, setFotoCapturada] = useState<string | null>(null);
+  const [modoTrocaSelfie, setModoTrocaSelfie] = useState(false);
+  const [qualidadeCamera, setQualidadeCamera] = useState<StatusQualidadeFoto>({
+    aprovada: false,
+    luzOk: false,
+    detalhesOk: false,
+    enquadramentoOk: false,
+    mensagem: 'Posicionando câmera...',
+  });
+
+  // Alterar PIN
+  const [pinAtualTroca, setPinAtualTroca] = useState('');
+  const [novoPinTroca, setNovoPinTroca] = useState('');
+  const [confirmarNovoPinTroca, setConfirmarNovoPinTroca] = useState('');
+
+  // Extrato & Dependentes
   const [extratoLista, setExtratoLista] = useState<any[]>([]);
+  const [transacaoExpandidaId, setTransacaoExpandidaId] = useState<string | null>(null);
   const [dependentesLista, setDependentesLista] = useState<any[]>([]);
   const [dependentesSelfiesMap, setDependentesSelfiesMap] = useState<Record<string, string>>({});
-  const [depGerenciando, setDepGerenciando] = useState<any | null>(null);
-  const [dependenteSelecionado, setDependenteSelecionado] = useState<any | null>(null);
-  const [avisosLista, setAvisosLista] = useState<any[]>([]);
-  const [classificadosLista, setClassificadosLista] = useState<any[]>([]);
 
-  // =========================================================================
-  // NAVEGAÇÃO COM ENDEREÇO NA URL E BOTÃO VOLTAR DO CELULAR/NAVEGADOR
-  // =========================================================================
+  // Novo Dependente
+  const [depNome, setDepNome] = useState('');
+  const [depCpf, setDepCpf] = useState('');
+  const [depNascimento, setDepNascimento] = useState('');
+  const [depPin, setDepPin] = useState('');
+  const [depSelfieBase64, setDepSelfieBase64] = useState<string | null>(null);
+  const [aceiteLgpdDependente, setAceiteLgpdDependente] = useState(false);
+
+  // Pix Dependente
+  const [dependenteSelecionado, setDependenteSelecionado] = useState<any>(null);
+  const [valorPix, setValorPix] = useState('20.00');
+  const [pixCopiaECola, setPixCopiaECola] = useState('');
+  const [pinConfirmacaoPix, setPinConfirmacaoPix] = useState('');
+
+  // Mural & Admin
+  const [avisosLista, setAvisosLista] = useState<any[]>([]);
+  const [adminSecao, setAdminSecao] = useState<'moradores' | 'mural'>('moradores');
+  const [adminMoradores, setAdminMoradores] = useState<any[]>([]);
+  const [adminBuscaMorador, setAdminBuscaMorador] = useState('');
+  const [adminFiltroStatus, setAdminFiltroStatus] = useState<'todos' | 'aprovado' | 'bloqueado' | 'sem_selfie'>('todos');
+  const [adminEditandoMorador, setAdminEditandoMorador] = useState<any | null>(null);
+  const [adminEditNome, setAdminEditNome] = useState('');
+  const [adminEditWhatsapp, setAdminEditWhatsapp] = useState('');
+  const [adminEditUnidade, setAdminEditUnidade] = useState('');
+  const [adminEditStatus, setAdminEditStatus] = useState('aprovado');
+  const [adminFotoAmpliadaUrl, setAdminFotoAmpliadaUrl] = useState<string | null>(null);
+
+  const [adminAvisoEditId, setAdminAvisoEditId] = useState<string | null>(null);
+  const [adminAvisoTitulo, setAdminAvisoTitulo] = useState('');
+  const [adminAvisoConteudo, setAdminAvisoConteudo] = useState('');
+  const [adminAvisoFotoFile, setAdminAvisoFotoFile] = useState<File | null>(null);
+  const [adminAvisoFotoPreview, setAdminAvisoFotoPreview] = useState<string | null>(null);
+
   function navegarParaAba(
     novaAba: 'login' | 'cadastro' | 'confirmar_wa' | 'esqueci_pin' | 'painel',
-    novaAbaInferior?: 'inicio' | 'mural' | 'classificados' | 'ajuda' | 'perfil' | 'admin'
+    novaAbaInferior?: 'inicio' | 'estoque' | 'mural' | 'ajuda' | 'perfil' | 'admin'
   ) {
     setAba(novaAba);
     const abaAlvo = novaAbaInferior || abaInferior;
@@ -67,32 +149,16 @@ export default function VilaMarketApp() {
     }
   }
 
-  function abrirModalComHistorico(
-    novoModal:
-      | 'selfie'
-      | 'pin'
-      | 'extrato'
-      | 'novo_dependente'
-      | 'gerenciar_dependente'
-      | 'pix_dependente'
-      | 'novo_anuncio'
-  ) {
-    setModalAtivo(novoModal);
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      params.set('modal', novoModal);
-      window.history.pushState(
-        { tela: aba, aba: abaInferior, modal: novoModal },
-        '',
-        `?${params.toString()}`
-      );
-    }
-  }
-
   useEffect(() => {
     function aoVoltarNoNavegador(event: PopStateEvent) {
       if (modalAtivo) {
+        fecharCamera();
         setModalAtivo(null);
+        return;
+      }
+      if (adminEditandoMorador) {
+        setAdminEditandoMorador(null);
+        setAdminFotoAmpliadaUrl(null);
         return;
       }
       if (event.state?.tela) {
@@ -103,63 +169,147 @@ export default function VilaMarketApp() {
         setAbaInferior('inicio');
       }
     }
-
     window.addEventListener('popstate', aoVoltarNoNavegador);
     return () => window.removeEventListener('popstate', aoVoltarNoNavegador);
-  }, [modalAtivo, usuarioLogado, abaInferior]);
-
-  // =========================================================================
-  // SESSÃO E STORAGE
-  // =========================================================================
-  function salvarSessaoNoNavegador(dadosUsuario: any) {
-    try {
-      localStorage.setItem(
-        CHAVE_STORAGE,
-        JSON.stringify({ usuario: dadosUsuario, expiraEm: Date.now() + TEMPO_SESSAO_MS })
-      );
-    } catch {}
-  }
-
-  function limparSessaoDoNavegador() {
-    try {
-      localStorage.removeItem(CHAVE_STORAGE);
-    } catch {}
-  }
+  }, [modalAtivo, adminEditandoMorador, usuarioLogado, abaInferior]);
 
   useEffect(() => {
-    try {
-      const salvo = localStorage.getItem(CHAVE_STORAGE);
-      if (salvo) {
-        const sessao = JSON.parse(salvo);
-        if (sessao?.usuario && sessao?.expiraEm && Date.now() < sessao.expiraEm) {
-          setUsuarioLogado(sessao.usuario);
-          const params = new URLSearchParams(window.location.search);
-          const abaUrl = params.get('aba') as any;
-          const abasValidas = ['inicio', 'mural', 'classificados', 'ajuda', 'perfil', 'admin'];
-          const abaInicial = abasValidas.includes(abaUrl) ? abaUrl : 'inicio';
-
-          setAba('painel');
-          setAbaInferior(abaInicial);
-          window.history.replaceState(
-            { tela: 'painel', aba: abaInicial },
-            '',
-            `?tela=painel&aba=${abaInicial}`
-          );
-        } else {
-          localStorage.removeItem(CHAVE_STORAGE);
-        }
-      }
-    } catch {
-    } finally {
-      setVerificandoSessao(false);
-    }
+    restaurarSessaoSalva();
+    return () => pararAnaliseCamera();
   }, []);
 
+  useEffect(() => {
+    if (aba === 'cadastro' && unidades.length === 0) carregarUnidades();
+    if (aba === 'painel' && usuarioLogado?.perfil_id) {
+      carregarDadosDashboard();
+      carregarMural();
+    }
+  }, [aba, usuarioLogado?.perfil_id]);
+
+  useEffect(() => {
+    if (aba === 'painel' && abaInferior === 'admin' && (perfilDetalhes?.role === 'admin' || usuarioLogado?.role === 'admin')) {
+      carregarDadosAdmin();
+    }
+  }, [aba, abaInferior]);
+
+  // =========================================================================
+  // ANÁLISE BIOMÉTRICA DA SELFIE
+  // =========================================================================
+  async function analisarFrameDeVideo(video: HTMLVideoElement): Promise<StatusQualidadeFoto> {
+    if (!video || video.videoWidth === 0 || video.videoHeight === 0) {
+      return { aprovada: false, luzOk: false, detalhesOk: false, enquadramentoOk: false, mensagem: 'Iniciando câmera...' };
+    }
+
+    const tamanho = 240;
+    const canvas = document.createElement('canvas');
+    canvas.width = tamanho;
+    canvas.height = tamanho;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return { aprovada: false, luzOk: false, detalhesOk: false, enquadramentoOk: false, mensagem: 'Erro câmera.' };
+
+    const menorLado = Math.min(video.videoWidth, video.videoHeight);
+    ctx.drawImage(video, (video.videoWidth - menorLado) / 2, (video.videoHeight - menorLado) / 2, menorLado, menorLado, 0, 0, tamanho, tamanho);
+
+    const imgData = ctx.getImageData(0, 0, tamanho, tamanho).data;
+    const brilhoMatriz = new Float32Array(tamanho * tamanho);
+    const cx = tamanho * 0.5, cy = tamanho * 0.5, rx = tamanho * 0.26, ry = tamanho * 0.35;
+
+    let somaBrilhoOval = 0, pixelsDentroOval = 0;
+    let peleFaixaTesta = 0, totalFaixaTesta = 0, peleFaixaMeio = 0, totalFaixaMeio = 0, peleFaixaQueixo = 0, totalFaixaQueixo = 0;
+    let peleForaOval = 0, totalForaOval = 0, somaX = 0, somaY = 0, totalPeleRosto = 0;
+
+    for (let y = 0; y < tamanho; y++) {
+      for (let x = 0; x < tamanho; x++) {
+        const idx = (y * tamanho + x) * 4;
+        const r = imgData[idx], g = imgData[idx + 1], b = imgData[idx + 2];
+        const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        brilhoMatriz[y * tamanho + x] = lum;
+
+        const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+        const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+        const ehPele = r > 65 && g > 35 && b > 20 && r > g + 6 && r > b + 12 && cr >= 134 && cr <= 176 && cb >= 78 && cb <= 126;
+
+        const normX = (x - cx) / rx, normY = (y - cy) / ry;
+        if (normX * normX + normY * normY <= 1.0) {
+          somaBrilhoOval += lum;
+          pixelsDentroOval++;
+        } else {
+          totalForaOval++;
+          if (ehPele) peleForaOval++;
+        }
+
+        if (x >= tamanho * 0.35 && x <= tamanho * 0.65) {
+          if (y >= tamanho * 0.22 && y < tamanho * 0.36) { totalFaixaTesta++; if (ehPele) peleFaixaTesta++; }
+          else if (y >= tamanho * 0.36 && y < tamanho * 0.56) { totalFaixaMeio++; if (ehPele) peleFaixaMeio++; }
+          else if (y >= tamanho * 0.56 && y <= tamanho * 0.76) { totalFaixaQueixo++; if (ehPele) peleFaixaQueixo++; }
+        }
+
+        if (ehPele && y >= tamanho * 0.16 && y <= tamanho * 0.78 && x >= tamanho * 0.22 && x <= tamanho * 0.78) {
+          somaX += x; somaY += y; totalPeleRosto++;
+        }
+      }
+    }
+
+    const mediaBrilho = somaBrilhoOval / Math.max(1, pixelsDentroOval);
+    if (mediaBrilho < 55) return { aprovada: false, luzOk: false, detalhesOk: false, enquadramentoOk: false, mensagem: 'Pouca luz! Vá para um local mais iluminado.' };
+    if (mediaBrilho > 238) return { aprovada: false, luzOk: false, detalhesOk: false, enquadramentoOk: false, mensagem: 'Excesso de luz atrás de você.' };
+
+    let contrasteOval = 0, countContraste = 0;
+    for (let y = 2; y < tamanho - 2; y++) {
+      for (let x = 2; x < tamanho - 2; x++) {
+        if (((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 <= 0.75) {
+          const pos = y * tamanho + x;
+          contrasteOval += Math.abs(4 * brilhoMatriz[pos] - brilhoMatriz[pos - 1] - brilhoMatriz[pos + 1] - brilhoMatriz[pos - tamanho] - brilhoMatriz[pos + tamanho]);
+          countContraste++;
+        }
+      }
+    }
+    const nitidezMedia = contrasteOval / Math.max(1, countContraste);
+    const centroX = totalPeleRosto > 0 ? somaX / totalPeleRosto : 0;
+    const centroY = totalPeleRosto > 0 ? somaY / totalPeleRosto : 0;
+
+    if (totalPeleRosto < tamanho * tamanho * 0.06 || peleFaixaMeio / Math.max(1, totalFaixaMeio) < 0.40) {
+      return { aprovada: false, luzOk: true, detalhesOk: nitidezMedia >= 6.5, enquadramentoOk: false, mensagem: 'Centralize o rosto dentro da guia pontilhada.' };
+    }
+    if (peleFaixaTesta / Math.max(1, totalFaixaTesta) < 0.28 || centroY > tamanho * 0.59) {
+      return { aprovada: false, luzOk: true, detalhesOk: nitidezMedia >= 6.5, enquadramentoOk: false, mensagem: 'Rosto muito baixo! Suba o celular.' };
+    }
+    if (peleFaixaQueixo / Math.max(1, totalFaixaQueixo) < 0.28 || centroY < tamanho * 0.34) {
+      return { aprovada: false, luzOk: true, detalhesOk: nitidezMedia >= 6.5, enquadramentoOk: false, mensagem: 'Rosto muito alto! Abaixe um pouco o celular.' };
+    }
+    if (peleForaOval / Math.max(1, totalForaOval) > 0.45) {
+      return { aprovada: false, luzOk: true, detalhesOk: nitidezMedia >= 6.5, enquadramentoOk: false, mensagem: 'Afaste um pouco o celular.' };
+    }
+    if (Math.abs(centroX - cx) > tamanho * 0.11) {
+      return { aprovada: false, luzOk: true, detalhesOk: nitidezMedia >= 6.5, enquadramentoOk: false, mensagem: 'Centralize o rosto horizontalmente.' };
+    }
+    if (nitidezMedia < 6.5) {
+      return { aprovada: false, luzOk: true, detalhesOk: false, enquadramentoOk: true, mensagem: 'Foto sem nitidez. Mantenha o celular firme.' };
+    }
+
+    return { aprovada: true, luzOk: true, detalhesOk: true, enquadramentoOk: true, mensagem: '✅ Rosto enquadrado e iluminação ótima! Pode capturar.' };
+  }
+
+  function iniciarMonitoramentoQualidade() {
+    pararAnaliseCamera();
+    intervaloAnaliseRef.current = setInterval(async () => {
+      if (videoRef.current) setQualidadeCamera(await analisarFrameDeVideo(videoRef.current));
+    }, 350);
+  }
+
+  function pararAnaliseCamera() {
+    if (intervaloAnaliseRef.current) {
+      clearInterval(intervaloAnaliseRef.current);
+      intervaloAnaliseRef.current = null;
+    }
+  }
+
+  // =========================================================================
+  // STORAGE & SESSÃO
+  // =========================================================================
   async function gerarUrlTemporariaSelfie(caminhoOuBase64: string | null): Promise<string | null> {
     if (!caminhoOuBase64) return null;
-    if (caminhoOuBase64.startsWith('data:image') || caminhoOuBase64.startsWith('http')) {
-      return caminhoOuBase64;
-    }
+    if (caminhoOuBase64.startsWith('data:image') || caminhoOuBase64.startsWith('http')) return caminhoOuBase64;
 
     const chaveCache = `vm_selfie_cache_${caminhoOuBase64}`;
     try {
@@ -170,16 +320,11 @@ export default function VilaMarketApp() {
       }
     } catch {}
 
-    const { data, error } = await supabase.storage
-      .from('selfies')
-      .createSignedUrl(caminhoOuBase64, 600);
+    const { data, error } = await supabase.storage.from('selfies').createSignedUrl(caminhoOuBase64, 600);
     if (error || !data?.signedUrl) return null;
 
     try {
-      sessionStorage.setItem(
-        chaveCache,
-        JSON.stringify({ url: data.signedUrl, expiraEm: Date.now() + 8 * 60 * 1000 })
-      );
+      sessionStorage.setItem(chaveCache, JSON.stringify({ url: data.signedUrl, expiraEm: Date.now() + 8 * 60 * 1000 }));
     } catch {}
     return data.signedUrl;
   }
@@ -188,43 +333,89 @@ export default function VilaMarketApp() {
     const resposta = await fetch(fotoBase64);
     const blob = await resposta.blob();
     const caminhoArquivo = `${perfilIdAlvo}/facial_${Date.now()}.jpg`;
-
-    const { error: uploadError } = await supabase.storage
-      .from('selfies')
-      .upload(caminhoArquivo, blob, { contentType: 'image/jpeg', upsert: true });
+    const { error: uploadError } = await supabase.storage.from('selfies').upload(caminhoArquivo, blob, {
+      contentType: 'image/jpeg',
+      upsert: true,
+    });
     if (uploadError) throw new Error(uploadError.message);
-
     return caminhoArquivo;
   }
 
-  async function carregarDadosDashboard() {
-    const idAlvo = usuarioLogado?.perfil_id;
-    if (!idAlvo) return;
+  async function enviarFotoMuralOtimizada(file: File): Promise<string> {
+    const caminho = `mural/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
+    const { error } = await supabase.storage.from('comunidade').upload(caminho, file, {
+      contentType: file.type || 'image/jpeg',
+      upsert: true,
+    });
+    if (error) throw new Error(error.message);
+    const { data } = supabase.storage.from('comunidade').getPublicUrl(caminho);
+    return data.publicUrl;
+  }
 
-    if (usuarioLogado?.selfie_url) {
+  function salvarSessaoNoNavegador(dadosUsuario: any) {
+    try {
+      localStorage.setItem(CHAVE_STORAGE, JSON.stringify({ usuario: dadosUsuario, expiraEm: Date.now() + TEMPO_SESSAO_MS }));
+    } catch {}
+  }
+
+  function limparSessaoDoNavegador() {
+    try {
+      localStorage.removeItem(CHAVE_STORAGE);
+    } catch {}
+  }
+
+  function restaurarSessaoSalva() {
+    try {
+      const salvo = localStorage.getItem(CHAVE_STORAGE);
+      if (salvo) {
+        const sessao = JSON.parse(salvo);
+        if (sessao?.usuario && sessao?.expiraEm && Date.now() < sessao.expiraEm) {
+          setUsuarioLogado(sessao.usuario);
+          setAba('painel');
+          setAbaInferior('inicio');
+        } else {
+          localStorage.removeItem(CHAVE_STORAGE);
+        }
+      }
+    } catch {
+    } finally {
+      setVerificandoSessao(false);
+    }
+  }
+
+  async function carregarUnidades() {
+    const { data: conds } = await supabase.from('condominios').select('id').limit(1);
+    if (conds && conds.length > 0) setCondominioId(conds[0].id);
+
+    const { data } = await supabase.from('unidades').select('*').eq('ativo', true).order('identificador', { ascending: true });
+    if (data) {
+      setUnidades(data);
+      const primeira = data.find((u) => u.tipo === 'bloco');
+      if (primeira) setUnidadeId(primeira.id);
+    }
+  }
+
+  async function carregarDadosDashboard() {
+    if (!usuarioLogado?.perfil_id) return;
+
+    if (usuarioLogado?.selfie_url && !selfieTemporariaUrl) {
       gerarUrlTemporariaSelfie(usuarioLogado.selfie_url).then((url) => {
-        if (url && usuarioLogado?.perfil_id === idAlvo) setSelfieTemporariaUrl(url);
+        if (url) setSelfieTemporariaUrl(url);
       });
-    } else {
-      setSelfieTemporariaUrl(null);
     }
 
     const [resPerfil, resDeps] = await Promise.all([
       supabase
         .from('perfis')
-        .select(
-          'id, condominio_id, unidade_id, complemento_apto, unidade_formatada, nome_completo, cpf, data_nascimento, whatsapp, role, selfie_url, status_facial, status_cadastro, saldo_cashback, saldo_pre_pago'
-        )
-        .eq('id', idAlvo)
+        .select('id, condominio_id, unidade_id, complemento_apto, unidade_formatada, nome_completo, cpf, whatsapp, role, selfie_url, status_facial, status_cadastro, saldo_cashback, saldo_pre_pago')
+        .eq('id', usuarioLogado.perfil_id)
         .single(),
       supabase
         .from('perfis')
         .select('id, nome_completo, cpf, role, selfie_url, status_facial, status_cadastro, saldo_pre_pago, criado_em')
-        .eq('titular_id', idAlvo)
+        .eq('titular_id', usuarioLogado.perfil_id)
         .order('criado_em', { ascending: true }),
     ]);
-
-    if (usuarioLogado?.perfil_id !== idAlvo) return;
 
     const perfil = resPerfil.data;
     if (perfil) {
@@ -233,7 +424,7 @@ export default function VilaMarketApp() {
 
       if (perfil.selfie_url) {
         const urlSegura = await gerarUrlTemporariaSelfie(perfil.selfie_url);
-        if (urlSegura && usuarioLogado?.perfil_id === idAlvo) setSelfieTemporariaUrl(urlSegura);
+        if (urlSegura) setSelfieTemporariaUrl(urlSegura);
       } else {
         setSelfieTemporariaUrl(null);
       }
@@ -241,7 +432,6 @@ export default function VilaMarketApp() {
       if (perfil.role === 'titular' || perfil.role === 'admin') {
         const deps = resDeps.data || [];
         setDependentesLista(deps);
-
         const mapaFotos: Record<string, string> = {};
         await Promise.all(
           deps.map(async (d: any) => {
@@ -256,35 +446,434 @@ export default function VilaMarketApp() {
     }
   }
 
-  async function carregarMuralEClassificados() {
-    const [resAvisos, resClass] = await Promise.all([
-      supabase
-        .from('avisos_mural')
-        .select('*')
-        .order('fixado', { ascending: false })
-        .order('criado_em', { ascending: false }),
-      supabase
-        .from('classificados')
-        .select('*, perfis:anunciante_id (nome_completo, unidade_formatada)')
-        .order('criado_em', { ascending: false }),
-    ]);
-    if (resAvisos.data) setAvisosLista(resAvisos.data);
-    if (resClass.data) setClassificadosLista(resClass.data);
+  // =========================================================================
+  // MURAL & ADMIN
+  // =========================================================================
+  async function carregarMural() {
+    const { data } = await supabase.from('avisos_mural').select('*').order('fixado', { ascending: false }).order('criado_em', { ascending: false });
+    if (data) setAvisosLista(data);
   }
 
-  useEffect(() => {
-    if (aba === 'painel' && usuarioLogado?.perfil_id) {
-      setPerfilDetalhes(null);
-      setSelfieTemporariaUrl(null);
-      setDependentesLista([]);
-      setDependentesSelfiesMap({});
-      carregarDadosDashboard();
-      carregarMuralEClassificados();
+  async function carregarDadosAdmin() {
+    const [resPerfis, resAvisos] = await Promise.all([
+      supabase
+        .from('perfis')
+        .select('id, nome_completo, cpf, whatsapp, unidade_formatada, role, status_cadastro, status_facial, selfie_url, saldo_cashback, saldo_pre_pago, criado_em')
+        .order('nome_completo', { ascending: true }),
+      supabase.from('avisos_mural').select('*').order('fixado', { ascending: false }).order('criado_em', { ascending: false }),
+    ]);
+    if (resPerfis.data) setAdminMoradores(resPerfis.data);
+    if (resAvisos.data) setAvisosLista(resAvisos.data);
+  }
+
+  async function adminAlternarBloqueioMorador(morador: any) {
+    const novoStatus = morador.status_cadastro === 'bloqueado' ? 'aprovado' : 'bloqueado';
+    setCarregando(true);
+    const { data, error } = await supabase.rpc('admin_atualizar_perfil', {
+      p_perfil_id: morador.id,
+      p_nome_completo: morador.nome_completo,
+      p_whatsapp: morador.whatsapp || '',
+      p_unidade_formatada: morador.unidade_formatada || '',
+      p_status_cadastro: novoStatus,
+      p_remover_foto: false,
+    });
+    setCarregando(false);
+    if (error || !data?.sucesso) {
+      alert(error?.message || data?.mensagem || 'Erro ao alterar status.');
+      return;
     }
-  }, [aba, usuarioLogado?.perfil_id]);
+    await carregarDadosAdmin();
+  }
+
+  function adminAbrirEdicaoMorador(morador: any) {
+    setAdminEditandoMorador(morador);
+    setAdminEditNome(morador.nome_completo || '');
+    setAdminEditWhatsapp(morador.whatsapp || '');
+    setAdminEditUnidade(morador.unidade_formatada || '');
+    setAdminEditStatus(morador.status_cadastro || 'aprovado');
+  }
+
+  async function adminSalvarEdicaoMorador(e: React.FormEvent) {
+    e.preventDefault();
+    if (!adminEditandoMorador) return;
+    setCarregando(true);
+    const { data, error } = await supabase.rpc('admin_atualizar_perfil', {
+      p_perfil_id: adminEditandoMorador.id,
+      p_nome_completo: formatarNomeTitleCase(adminEditNome),
+      p_whatsapp: adminEditWhatsapp.replace(/\D/g, ''),
+      p_unidade_formatada: adminEditUnidade,
+      p_status_cadastro: adminEditStatus,
+      p_remover_foto: false,
+    });
+    setCarregando(false);
+    if (error || !data?.sucesso) {
+      alert(error?.message || data?.mensagem || 'Erro ao salvar dados.');
+      return;
+    }
+    setAdminEditandoMorador(null);
+    await carregarDadosAdmin();
+    alert('Dados do morador atualizados!');
+  }
+
+  async function adminVisualizarSelfieMorador(morador: any) {
+    if (!morador.selfie_url) return;
+    const url = await gerarUrlTemporariaSelfie(morador.selfie_url);
+    if (url) {
+      setAdminFotoAmpliadaUrl(url);
+      setAdminEditandoMorador(morador);
+    } else {
+      alert('Não foi possível carregar a imagem.');
+    }
+  }
+
+  async function adminRemoverFotoMorador(morador: any) {
+    if (!window.confirm(`Remover a foto facial de ${morador.nome_completo}?`)) return;
+    setCarregando(true);
+    try {
+      if (morador.selfie_url && !morador.selfie_url.startsWith('data:image')) {
+        await supabase.storage.from('selfies').remove([morador.selfie_url]);
+      }
+      const { data, error } = await supabase.rpc('admin_atualizar_perfil', {
+        p_perfil_id: morador.id,
+        p_nome_completo: morador.nome_completo,
+        p_whatsapp: morador.whatsapp || '',
+        p_unidade_formatada: morador.unidade_formatada || '',
+        p_status_cadastro: morador.status_cadastro || 'aprovado',
+        p_remover_foto: true,
+      });
+      if (error || !data?.sucesso) throw new Error(error?.message || data?.mensagem);
+      setAdminFotoAmpliadaUrl(null);
+      setAdminEditandoMorador(null);
+      await carregarDadosAdmin();
+      alert('Foto removida com sucesso.');
+    } catch (err: any) {
+      alert('Erro ao remover foto: ' + err.message);
+    } finally {
+      setCarregando(false);
+    }
+  }
+
+  async function adminSalvarAvisoMural(e: React.FormEvent) {
+    e.preventDefault();
+    if (!adminAvisoTitulo.trim() || !adminAvisoConteudo.trim()) return;
+    setCarregando(true);
+    try {
+      let cId = perfilDetalhes?.condominio_id || condominioId;
+      if (!cId) {
+        const { data: cData } = await supabase.from('condominios').select('id').limit(1);
+        cId = cData?.[0]?.id || null;
+      }
+
+      let imagemFinalUrl = adminAvisoFotoPreview;
+      if (adminAvisoFotoFile) imagemFinalUrl = await enviarFotoMuralOtimizada(adminAvisoFotoFile);
+
+      if (adminAvisoEditId) {
+        const { error } = await supabase
+          .from('avisos_mural')
+          .update({ titulo: adminAvisoTitulo.trim(), conteudo: adminAvisoConteudo.trim(), imagem_url: imagemFinalUrl || null })
+          .eq('id', adminAvisoEditId);
+        if (error) throw new Error(error.message);
+      } else {
+        const { error } = await supabase.from('avisos_mural').insert({
+          condominio_id: cId || null,
+          autor_id: usuarioLogado.perfil_id,
+          titulo: adminAvisoTitulo.trim(),
+          conteudo: adminAvisoConteudo.trim(),
+          imagem_url: imagemFinalUrl || null,
+          fixado: false,
+        });
+        if (error) throw new Error(error.message);
+      }
+
+      setAdminAvisoEditId(null);
+      setAdminAvisoTitulo('');
+      setAdminAvisoConteudo('');
+      setAdminAvisoFotoFile(null);
+      setAdminAvisoFotoPreview(null);
+      await carregarDadosAdmin();
+      alert('Aviso publicado no Mural!');
+    } catch (err: any) {
+      alert('Erro ao salvar aviso: ' + err.message);
+    } finally {
+      setCarregando(false);
+    }
+  }
+
+  async function adminExcluirAvisoMural(id: string) {
+    if (!window.confirm('Excluir este aviso do Mural?')) return;
+    const { error } = await supabase.from('avisos_mural').delete().eq('id', id);
+    if (!error) await carregarDadosAdmin();
+  }
+
+  // =========================================================================
+  // LOGIN, CADASTRO & WHATSAPP
+  // =========================================================================
+  async function fazerLogin(e: React.FormEvent) {
+    e.preventDefault();
+    setCarregando(true);
+    setMensagem(null);
+
+    const cpfLimpo = cpf.replace(/\D/g, '');
+    const { data, error } = await supabase.rpc('validar_cpf_pin', { p_cpf: cpfLimpo, p_pin: pin });
+    setCarregando(false);
+
+    if (error) {
+      setMensagem({ tipo: 'erro', texto: error.message });
+      return;
+    }
+
+    if (data?.sucesso) {
+      setUsuarioLogado(data);
+      salvarSessaoNoNavegador(data);
+      navegarParaAba('painel', 'inicio');
+    } else {
+      setMensagem({ tipo: 'erro', texto: data?.mensagem || 'Erro ao validar acesso.' });
+    }
+  }
+
+  async function realizarCadastro(e: React.FormEvent) {
+    e.preventDefault();
+    if (!aceiteLgpdTitular) {
+      setMensagem({ tipo: 'erro', texto: 'Você precisa concordar com o Termo de Privacidade (LGPD).' });
+      return;
+    }
+
+    setCarregando(true);
+    setMensagem(null);
+
+    const cpfLimpo = cpf.replace(/\D/g, '');
+    const waLimpo = whatsapp.replace(/\D/g, '');
+    const emailTecnico = `user_${cpfLimpo}@vilamarket.com.br`;
+    const senhaAuth = `VM#${pin}#${cpfLimpo.slice(-4)}`;
+
+    const unidadeObj = unidades.find((u) => u.id === unidadeId);
+    const formatada =
+      tipoUnidade === 'bloco'
+        ? `${ruaSelecionada} - Bloco ${unidadeObj?.identificador || ''} - Apto ${complementoApto}`
+        : `${ruaSelecionada} - Casa ${unidadeObj?.identificador || ''}`;
+
+    const { data: authData, error: authErr } = await supabase.auth.signUp({ email: emailTecnico, password: senhaAuth });
+    if (authErr || !authData.user) {
+      setCarregando(false);
+      setMensagem({ tipo: 'erro', texto: authErr?.message || 'Erro ao criar credencial.' });
+      return;
+    }
+
+    const { error: perfilErr } = await supabase.from('perfis').insert({
+      id: authData.user.id,
+      condominio_id: condominioId || null,
+      unidade_id: unidadeId || null,
+      complemento_apto: tipoUnidade === 'bloco' ? complementoApto : null,
+      unidade_formatada: formatada,
+      nome_completo: formatarNomeTitleCase(nome.trim()),
+      cpf: cpfLimpo,
+      data_nascimento: dataNasc,
+      whatsapp: waLimpo,
+      role: 'titular',
+      pin_hash: 'temp',
+    });
+
+    if (perfilErr) {
+      setCarregando(false);
+      setMensagem({ tipo: 'erro', texto: perfilErr.message });
+      return;
+    }
+
+    const { error: pinErr } = await supabase.rpc('definir_pin_usuario', { p_perfil_id: authData.user.id, p_pin_aberto: pin });
+    setCarregando(false);
+    if (pinErr) {
+      setMensagem({ tipo: 'erro', texto: pinErr.message });
+      return;
+    }
+
+    setMensagem({ tipo: 'sucesso', texto: 'Cadastro criado! Digite o código de 6 dígitos enviado para o seu WhatsApp.' });
+    navegarParaAba('confirmar_wa');
+  }
+
+  async function confirmarCodigoCadastro(e: React.FormEvent) {
+    e.preventDefault();
+    setCarregando(true);
+    setMensagem(null);
+
+    const cpfLimpo = cpf.replace(/\D/g, '');
+    const { data, error } = await supabase.rpc('confirmar_cadastro_whatsapp', { p_cpf: cpfLimpo, p_codigo: codigoWa });
+    if (error || !data?.sucesso) {
+      setCarregando(false);
+      setMensagem({ tipo: 'erro', texto: error?.message || data?.mensagem });
+      return;
+    }
+
+    const { data: loginData, error: loginError } = await supabase.rpc('validar_cpf_pin', { p_cpf: cpfLimpo, p_pin: pin });
+    setCarregando(false);
+
+    if (loginError || !loginData?.sucesso) {
+      setMensagem({ tipo: 'sucesso', texto: data.mensagem });
+      navegarParaAba('login');
+      return;
+    }
+
+    setUsuarioLogado(loginData);
+    salvarSessaoNoNavegador(loginData);
+    setMensagem(null);
+    navegarParaAba('painel', 'inicio');
+  }
+
+  async function pedirCodigoResetPin() {
+    setCarregando(true);
+    setMensagem(null);
+    const { data, error } = await supabase.rpc('solicitar_reset_pin_whatsapp', { p_cpf: cpf.replace(/\D/g, '') });
+    setCarregando(false);
+    if (error || !data?.sucesso) setMensagem({ tipo: 'erro', texto: error?.message || data?.mensagem });
+    else setMensagem({ tipo: 'sucesso', texto: data.mensagem });
+  }
+
+  async function salvarNovoPinWhatsApp(e: React.FormEvent) {
+    e.preventDefault();
+    setCarregando(true);
+    setMensagem(null);
+    const { data, error } = await supabase.rpc('confirmar_reset_pin_whatsapp', {
+      p_cpf: cpf.replace(/\D/g, ''),
+      p_codigo: codigoWa,
+      p_novo_pin: novoPin,
+    });
+    setCarregando(false);
+    if (error || !data?.sucesso) setMensagem({ tipo: 'erro', texto: error?.message || data?.mensagem });
+    else {
+      setMensagem({ tipo: 'sucesso', texto: data.mensagem });
+      navegarParaAba('login');
+    }
+  }
+
+  // =========================================================================
+  // SELFIE, PIN, EXTRATO & DEPENDENTES
+  // =========================================================================
+  async function iniciarCameraSelfie() {
+    setFotoCapturada(null);
+    setModoTrocaSelfie(true);
+    setQualidadeCamera({
+      aprovada: false,
+      luzOk: false,
+      detalhesOk: false,
+      enquadramentoOk: false,
+      mensagem: 'Iniciando câmera e analisando luz...',
+    });
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 480, height: 480 } });
+      setStreamCamera(stream);
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          iniciarMonitoramentoQualidade();
+        }
+      }, 150);
+    } catch {
+      alert('Permita o acesso à câmera frontal do navegador para tirar a sua selfie.');
+    }
+  }
+
+  async function abrirModalSelfie() {
+    setFotoCapturada(null);
+    setModalAtivo('selfie');
+
+    if (perfilDetalhes?.selfie_url || usuarioLogado?.selfie_url) {
+      setModoTrocaSelfie(false);
+      const caminho = perfilDetalhes?.selfie_url || usuarioLogado?.selfie_url;
+      if (!selfieTemporariaUrl && caminho) {
+        const url = await gerarUrlTemporariaSelfie(caminho);
+        setSelfieTemporariaUrl(url);
+      }
+    } else {
+      iniciarCameraSelfie();
+    }
+  }
+
+  function fecharCamera() {
+    pararAnaliseCamera();
+    if (streamCamera) {
+      streamCamera.getTracks().forEach((track) => track.stop());
+      setStreamCamera(null);
+    }
+  }
+
+  async function capturarFrameSelfie(paraDependente = false) {
+    if (!videoRef.current) return;
+    const checagemFinal = await analisarFrameDeVideo(videoRef.current);
+    setQualidadeCamera(checagemFinal);
+    if (!checagemFinal.aprovada) {
+      alert(`Foto não aceita: ${checagemFinal.mensagem}`);
+      return;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 400;
+    canvas.height = 400;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      const menorLado = Math.min(videoRef.current.videoWidth, videoRef.current.videoHeight);
+      ctx.drawImage(videoRef.current, (videoRef.current.videoWidth - menorLado) / 2, (videoRef.current.videoHeight - menorLado) / 2, menorLado, menorLado, 0, 0, 400, 400);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
+      if (paraDependente) setDepSelfieBase64(dataUrl);
+      else setFotoCapturada(dataUrl);
+      fecharCamera();
+    }
+  }
+
+  async function salvarSelfieMorador() {
+    if (!fotoCapturada || !usuarioLogado?.perfil_id) return;
+    setCarregando(true);
+    try {
+      const caminhoPrivado = await enviarSelfieParaStoragePrivado(fotoCapturada, usuarioLogado.perfil_id);
+      const { data: rpcRes, error: rpcErr } = await supabase.rpc('atualizar_selfie_usuario', {
+        p_perfil_id: usuarioLogado.perfil_id,
+        p_caminho_selfie: caminhoPrivado,
+      });
+      if (rpcErr || !rpcRes?.sucesso) throw new Error(rpcErr?.message || rpcRes?.mensagem);
+
+      setSelfieTemporariaUrl(fotoCapturada);
+      setPerfilDetalhes((prev: any) => ({ ...(prev || {}), selfie_url: caminhoPrivado, status_facial: 'ativo' }));
+      const usuarioAtualizado = { ...usuarioLogado, selfie_url: caminhoPrivado, status_facial: 'ativo' };
+      setUsuarioLogado(usuarioAtualizado);
+      salvarSessaoNoNavegador(usuarioAtualizado);
+
+      setFotoCapturada(null);
+      setModoTrocaSelfie(false);
+      setModalAtivo(null);
+      setMensagem({ tipo: 'sucesso', texto: '✅ Selfie salva! Seu acesso facial na porta já está ativo.' });
+      carregarDadosDashboard();
+    } catch (err: any) {
+      alert('Erro ao salvar selfie: ' + (err.message || 'Tente novamente.'));
+    } finally {
+      setCarregando(false);
+    }
+  }
+
+  async function salvarTrocaPinLogado(e: React.FormEvent) {
+    e.preventDefault();
+    if (novoPinTroca.length !== 4 || novoPinTroca !== confirmarNovoPinTroca) {
+      alert('O novo PIN deve ter 4 dígitos e coincidir na confirmação.');
+      return;
+    }
+    setCarregando(true);
+    const { data, error } = await supabase.rpc('alterar_pin_usuario', {
+      p_perfil_id: usuarioLogado.perfil_id,
+      p_pin_atual: pinAtualTroca,
+      p_novo_pin: novoPinTroca,
+    });
+    setCarregando(false);
+    if (error || !data?.sucesso) {
+      alert(error?.message || data?.mensagem || 'Erro ao alterar PIN.');
+      return;
+    }
+    alert(data.mensagem);
+    setPinAtualTroca('');
+    setNovoPinTroca('');
+    setConfirmarNovoPinTroca('');
+    setModalAtivo(null);
+  }
 
   async function abrirModalExtrato() {
-    abrirModalComHistorico('extrato');
+    setModalAtivo('extrato');
     const idsFamilia = [usuarioLogado.perfil_id, ...dependentesLista.map((d) => d.id)];
     const { data } = await supabase
       .from('transacoes_carteira')
@@ -295,41 +884,190 @@ export default function VilaMarketApp() {
     setExtratoLista(data || []);
   }
 
-  async function solicitarExclusaoDadosLgpd() {
-    const confirmou = window.confirm(
-      'Deseja solicitar a exclusão dos seus dados biométricos (selfie) e encerramento da conta conforme a LGPD?'
-    );
-    if (!confirmou || !usuarioLogado?.perfil_id) return;
+  function calcularIdade(dataNascStr: string) {
+    const hoje = new Date();
+    const nasc = new Date(dataNascStr);
+    let idade = hoje.getFullYear() - nasc.getFullYear();
+    const m = hoje.getMonth() - nasc.getMonth();
+    if (m < 0 || (m === 0 && hoje.getDate() < nasc.getDate())) idade--;
+    return idade;
+  }
 
+  async function cadastrarDependente(e: React.FormEvent) {
+    e.preventDefault();
+    if (calcularIdade(depNascimento) < 12) {
+      alert('A idade mínima para cadastro de dependente é de 12 anos.');
+      return;
+    }
+    if (!depSelfieBase64) {
+      alert('Tire a selfie do dependente para liberar o acesso facial na porta.');
+      return;
+    }
+    if (!aceiteLgpdDependente) {
+      alert('Confirme o consentimento parental (Art. 14 da LGPD).');
+      return;
+    }
+    if (depPin.length !== 4) {
+      alert('O PIN do dependente deve ter 4 dígitos.');
+      return;
+    }
+
+    setCarregando(true);
+    try {
+      let cId: string | null = perfilDetalhes?.condominio_id || condominioId || null;
+      if (!cId) {
+        const { data: conds } = await supabase.from('condominios').select('id').limit(1);
+        cId = conds?.[0]?.id || null;
+      }
+
+      const cpfDepLimpo = depCpf.replace(/\D/g, '');
+      const { data: sessaoTitularAtual } = await supabase.auth.getSession();
+
+      const { data: authData, error: authErr } = await supabase.auth.signUp({
+        email: `user_${cpfDepLimpo}@vilamarket.com.br`,
+        password: `VM#${depPin}#${cpfDepLimpo.slice(-4)}`,
+      });
+      if (authErr || !authData.user) throw new Error(authErr?.message || 'CPF já cadastrado');
+
+      const novoDepId = authData.user.id;
+      const caminhoSelfieDep = await enviarSelfieParaStoragePrivado(depSelfieBase64, novoDepId);
+
+      const { error: insertErr } = await supabase.from('perfis').insert({
+        id: novoDepId,
+        condominio_id: cId,
+        unidade_id: perfilDetalhes?.unidade_id || null,
+        complemento_apto: perfilDetalhes?.complemento_apto || null,
+        unidade_formatada: perfilDetalhes?.unidade_formatada || usuarioLogado.unidade_formatada || '',
+        titular_id: usuarioLogado.perfil_id,
+        nome_completo: formatarNomeTitleCase(depNome.trim()),
+        cpf: cpfDepLimpo,
+        data_nascimento: depNascimento,
+        role: 'dependente',
+        selfie_url: caminhoSelfieDep,
+        pin_hash: 'temp',
+        status_cadastro: 'aprovado',
+        status_facial: 'ativo',
+      });
+      if (insertErr) throw new Error(insertErr.message);
+
+      await supabase.rpc('definir_pin_usuario', { p_perfil_id: novoDepId, p_pin_aberto: depPin });
+
+      if (sessaoTitularAtual?.session) {
+        await supabase.auth.setSession({
+          access_token: sessaoTitularAtual.session.access_token,
+          refresh_token: sessaoTitularAtual.session.refresh_token,
+        });
+      }
+
+      setDepNome('');
+      setDepCpf('');
+      setDepNascimento('');
+      setDepPin('');
+      setDepSelfieBase64(null);
+      setAceiteLgpdDependente(false);
+      fecharCamera();
+      setModalAtivo(null);
+      await carregarDadosDashboard();
+      alert('Dependente cadastrado com sucesso!');
+    } catch (err: any) {
+      alert('Erro ao cadastrar dependente: ' + (err.message || 'Tente novamente.'));
+    } finally {
+      setCarregando(false);
+    }
+  }
+
+  function abrirModalPixDependente(dep: any) {
+    setDependenteSelecionado(dep);
+    setValorPix('20.00');
+    setPinConfirmacaoPix('');
+    setPixCopiaECola(
+      `00020126580014BR.GOV.BCB.PIX0136vilamarket-pix-${dep.cpf}520400005303986540520.005802BR5910VILAMARKET6008CURITIBA62070503***6304ABCD`
+    );
+    setModalAtivo('pix_dependente');
+  }
+
+  async function confirmarRecargaPixDependente() {
+    if (!dependenteSelecionado || pinConfirmacaoPix.length !== 4) {
+      alert('Digite o SEU PIN de 4 dígitos para confirmar.');
+      return;
+    }
+
+    setCarregando(true);
+    const cpfTitularLimpo = (perfilDetalhes?.cpf || cpf || '').replace(/\D/g, '');
+    const { data: checkPin, error: errPin } = await supabase.rpc('validar_cpf_pin', {
+      p_cpf: cpfTitularLimpo,
+      p_pin: pinConfirmacaoPix,
+    });
+
+    if (errPin || !checkPin?.sucesso) {
+      setCarregando(false);
+      alert(checkPin?.mensagem || 'PIN de segurança incorreto.');
+      return;
+    }
+
+    const { data, error } = await supabase.rpc('adicionar_saldo_pix', {
+      p_perfil_id: dependenteSelecionado.id,
+      p_valor: parseFloat(valorPix),
+    });
+    setCarregando(false);
+
+    if (error || !data?.sucesso) {
+      alert(error?.message || data?.mensagem || 'Erro ao creditar saldo.');
+      return;
+    }
+
+    await carregarDadosDashboard();
+    setPinConfirmacaoPix('');
+    setModalAtivo(null);
+    alert(data.mensagem);
+  }
+
+  async function solicitarExclusaoDadosLgpd() {
+    if (!window.confirm('Deseja solicitar a exclusão dos seus dados biométricos (selfie) e encerramento da conta conforme a LGPD?')) return;
     setCarregando(true);
     try {
       const caminho = perfilDetalhes?.selfie_url || usuarioLogado?.selfie_url;
       if (caminho && !caminho.startsWith('data:image')) {
         await supabase.storage.from('selfies').remove([caminho]);
       }
-
       await supabase
         .from('perfis')
         .update({ selfie_url: null, status_facial: 'bloqueado', status_cadastro: 'bloqueado' })
         .eq('id', usuarioLogado.perfil_id);
 
-      alert('Seus dados biométricos foram removidos e seu acesso foi encerrado conforme a LGPD.');
+      alert('Seus dados biométricos foram removidos conforme a LGPD.');
       limparSessaoDoNavegador();
       setUsuarioLogado(null);
+      setPin('');
       navegarParaAba('login');
     } catch {
-      alert('Não foi possível processar automaticamente. Contate a administração da Vila.');
+      alert('Não foi possível processar automaticamente. Contate a administração.');
     } finally {
       setCarregando(false);
     }
   }
 
+  const unidadesFiltradas = unidades.filter((u) => u.tipo === tipoUnidade);
   const temSelfie = Boolean(perfilDetalhes?.selfie_url || usuarioLogado?.selfie_url || selfieTemporariaUrl);
   const roleUsuario = perfilDetalhes?.role || usuarioLogado?.role || 'titular';
-  const ehMenorDeIdade =
-    roleUsuario === 'dependente' && perfilDetalhes?.data_nascimento
-      ? calcularIdade(perfilDetalhes.data_nascimento) < 18
-      : false;
+  const qtdItensCarrinho = carrinhoScanGo.reduce((acc, item) => acc + item.quantidade, 0);
+
+  const adminMoradoresFiltrados = adminMoradores.filter((m) => {
+    if (adminFiltroStatus === 'aprovado' && m.status_cadastro !== 'aprovado') return false;
+    if (adminFiltroStatus === 'bloqueado' && m.status_cadastro !== 'bloqueado') return false;
+    if (adminFiltroStatus === 'sem_selfie' && Boolean(m.selfie_url)) return false;
+    if (adminBuscaMorador.trim()) {
+      const q = adminBuscaMorador.toLowerCase();
+      if (
+        !(m.nome_completo || '').toLowerCase().includes(q) &&
+        !(m.cpf || '').includes(q) &&
+        !(m.unidade_formatada || '').toLowerCase().includes(q)
+      ) {
+        return false;
+      }
+    }
+    return true;
+  });
 
   if (verificandoSessao) {
     return (
@@ -342,6 +1080,7 @@ export default function VilaMarketApp() {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4 pb-24 bg-gray-100">
       <div className="w-full max-w-md bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-200">
+        {/* Cabeçalho */}
         <div className="bg-floresta p-6 text-white text-center">
           <h1 className="text-2xl font-bold tracking-tight">VilaMarket</h1>
           <p className="text-xs text-emerald-200 mt-1">
@@ -362,68 +1101,323 @@ export default function VilaMarketApp() {
             </div>
           )}
 
-          {aba !== 'painel' && (
-            <AuthTelas
-              aba={aba}
-              navegarParaAba={navegarParaAba}
-              setMensagem={setMensagem}
-              onLoginSucesso={(dadosUsuario) => {
-                setUsuarioLogado(dadosUsuario);
-                salvarSessaoNoNavegador(dadosUsuario);
-                navegarParaAba('painel', 'inicio');
-              }}
-            />
+          {/* ABA 1: LOGIN */}
+          {aba === 'login' && (
+            <form onSubmit={fazerLogin} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold uppercase text-gray-600 mb-1">
+                  CPF do Morador ou Dependente
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={14}
+                  required
+                  placeholder="000.000.000-00"
+                  value={cpf}
+                  onChange={(e) => setCpf(formatarCPFVisual(e.target.value))}
+                  className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-floresta outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase text-gray-600 mb-1">
+                  PIN Secreto (4 dígitos)
+                </label>
+                <input
+                  type="password"
+                  maxLength={4}
+                  required
+                  placeholder="••••"
+                  value={pin}
+                  onChange={(e) => setPin(e.target.value)}
+                  className="w-full p-3 border rounded-xl text-center text-2xl tracking-widest focus:ring-2 focus:ring-floresta outline-none"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={carregando}
+                className="w-full bg-floresta hover:bg-floresta-claro text-white font-bold py-3 rounded-xl transition"
+              >
+                {carregando ? 'Verificando...' : 'Entrar no VilaMarket'}
+              </button>
+
+              <p className="text-[11px] text-center text-gray-400">
+                Seu acesso permanece conectado neste dispositivo por 7 dias.
+              </p>
+
+              <div className="flex justify-between text-xs pt-3 border-t">
+                <button
+                  type="button"
+                  onClick={() => navegarParaAba('cadastro')}
+                  className="text-floresta font-bold hover:underline"
+                >
+                  Criar Cadastro de Morador
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navegarParaAba('esqueci_pin')}
+                  className="text-ambar font-semibold hover:underline"
+                >
+                  Esqueci meu PIN
+                </button>
+              </div>
+            </form>
           )}
 
+          {/* ABA 2: CADASTRO */}
+          {aba === 'cadastro' && (
+            <form onSubmit={realizarCadastro} className="space-y-3">
+              <h2 className="font-bold text-lg text-grafite">Novo Cadastro na Vila</h2>
+
+              <input
+                type="text"
+                required
+                placeholder="Nome Completo"
+                value={nome}
+                onChange={(e) => setNome(formatarNomeTitleCase(e.target.value))}
+                className="w-full p-2.5 border rounded-xl text-sm"
+              />
+
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={14}
+                  required
+                  placeholder="000.000.000-00"
+                  value={cpf}
+                  onChange={(e) => setCpf(formatarCPFVisual(e.target.value))}
+                  className="w-full p-2.5 border rounded-xl text-sm"
+                />
+                <input
+                  type="text"
+                  required
+                  placeholder="WhatsApp (DDD+Número)"
+                  value={whatsapp}
+                  onChange={(e) => setWhatsapp(e.target.value)}
+                  className="w-full p-2.5 border rounded-xl text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Data de Nascimento</label>
+                <input
+                  type="date"
+                  required
+                  value={dataNasc}
+                  onChange={(e) => setDataNasc(e.target.value)}
+                  className="w-full p-2.5 border rounded-xl text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-600 mb-1">Rua da Vila Militar</label>
+                <select
+                  value={ruaSelecionada}
+                  onChange={(e) => setRuaSelecionada(e.target.value)}
+                  className="w-full p-2.5 border rounded-xl text-sm bg-white"
+                >
+                  <option value="Rua Sargento Lafayette">Rua Sargento Lafayette</option>
+                  <option value="Rua Sargento Erwin">Rua Sargento Erwin</option>
+                  <option value="Rua Sargento Milano">Rua Sargento Milano</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setTipoUnidade('bloco')}
+                  className={`py-2 rounded-lg text-xs font-bold border ${
+                    tipoUnidade === 'bloco' ? 'bg-floresta text-white border-floresta' : 'bg-gray-50 text-gray-600'
+                  }`}
+                >
+                  Bloco
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTipoUnidade('casa')}
+                  className={`py-2 rounded-lg text-xs font-bold border ${
+                    tipoUnidade === 'casa' ? 'bg-floresta text-white border-floresta' : 'bg-gray-50 text-gray-600'
+                  }`}
+                >
+                  Casa
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <select
+                  value={unidadeId}
+                  onChange={(e) => setUnidadeId(e.target.value)}
+                  className="w-full p-2.5 border rounded-xl text-sm bg-white"
+                >
+                  {unidadesFiltradas.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {tipoUnidade === 'bloco' ? `Bloco ${u.identificador}` : `Casa ${u.identificador}`}
+                    </option>
+                  ))}
+                </select>
+
+                {tipoUnidade === 'bloco' && (
+                  <input
+                    type="text"
+                    required
+                    placeholder="Nº Apto (ex: 102)"
+                    value={complementoApto}
+                    onChange={(e) => setComplementoApto(e.target.value)}
+                    className="w-full p-2.5 border rounded-xl text-sm"
+                  />
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-600 mb-1">
+                  Crie seu PIN Secreto de 4 dígitos
+                </label>
+                <input
+                  type="password"
+                  maxLength={4}
+                  required
+                  placeholder="4 dígitos"
+                  value={pin}
+                  onChange={(e) => setPin(e.target.value)}
+                  className="w-full p-2.5 border rounded-xl text-sm"
+                />
+              </div>
+
+              <label className="flex items-start gap-2 bg-gray-50 p-2.5 rounded-xl border border-gray-200 text-[11px] text-gray-600 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={aceiteLgpdTitular}
+                  onChange={(e) => setAceiteLgpdTitular(e.target.checked)}
+                  className="mt-0.5 accent-floresta"
+                />
+                <span>
+                  Li e concordo com o uso dos meus dados cadastrais e biométricos (selfie)
+                  exclusivamente para controle de acesso à porta e gestão da carteira no{' '}
+                  <strong>VilaMarket</strong> (LGPD).
+                </span>
+              </label>
+
+              <button
+                type="submit"
+                disabled={carregando}
+                className="w-full bg-floresta hover:bg-floresta-claro text-white font-bold py-3 rounded-xl transition"
+              >
+                {carregando ? 'Cadastrando...' : 'Receber Código no WhatsApp'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => navegarParaAba('login')}
+                className="w-full text-xs text-gray-500 hover:underline pt-2"
+              >
+                Voltar para o Login
+              </button>
+            </form>
+          )}
+
+          {/* ABA 3: CONFIRMAR WHATSAPP */}
+          {aba === 'confirmar_wa' && (
+            <form onSubmit={confirmarCodigoCadastro} className="space-y-4">
+              <h2 className="font-bold text-lg">Confirme seu WhatsApp</h2>
+              <p className="text-xs text-gray-600">
+                Digite o código de 6 dígitos enviado para o seu WhatsApp:
+              </p>
+              <input
+                type="text"
+                maxLength={6}
+                required
+                placeholder="000000"
+                value={codigoWa}
+                onChange={(e) => setCodigoWa(e.target.value)}
+                className="w-full p-3 border rounded-xl text-center text-2xl tracking-widest"
+              />
+              <button type="submit" disabled={carregando} className="w-full bg-floresta text-white font-bold py-3 rounded-xl">
+                Ativar Meu Acesso Agora
+              </button>
+            </form>
+          )}
+
+          {/* ABA 4: ESQUECI PIN */}
+          {aba === 'esqueci_pin' && (
+            <form onSubmit={salvarNovoPinWhatsApp} className="space-y-3">
+              <h2 className="font-bold text-lg">Recuperar PIN via WhatsApp</h2>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={14}
+                  required
+                  placeholder="000.000.000-00"
+                  value={cpf}
+                  onChange={(e) => setCpf(formatarCPFVisual(e.target.value))}
+                  className="flex-1 p-2.5 border rounded-xl text-sm"
+                />
+                <button type="button" onClick={pedirCodigoResetPin} className="bg-ambar text-white px-3 rounded-xl text-xs font-bold">
+                  Enviar Código
+                </button>
+              </div>
+              <input
+                type="text"
+                maxLength={6}
+                required
+                placeholder="Código de 6 dígitos"
+                value={codigoWa}
+                onChange={(e) => setCodigoWa(e.target.value)}
+                className="w-full p-2.5 border rounded-xl text-sm"
+              />
+              <input
+                type="password"
+                maxLength={4}
+                required
+                placeholder="Novo PIN de 4 dígitos"
+                value={novoPin}
+                onChange={(e) => setNovoPin(e.target.value)}
+                className="w-full p-2.5 border rounded-xl text-sm"
+              />
+              <button type="submit" className="w-full bg-floresta text-white font-bold py-3 rounded-xl">
+                Salvar Novo PIN
+              </button>
+              <button type="button" onClick={() => navegarParaAba('login')} className="w-full text-xs text-gray-500 pt-1">
+                Voltar
+              </button>
+            </form>
+          )}
+
+          {/* ABA 5: PAINEL DO MORADOR LOGADO */}
           {aba === 'painel' && usuarioLogado && (
             <div className="space-y-5">
-              {/* ABA INÍCIO */}
+              {/* SUB-ABA INÍCIO */}
               {abaInferior === 'inicio' && (
                 <>
                   {!temSelfie ? (
                     <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl">
                       <div className="flex items-center justify-between gap-2">
-                        <p className="text-xs font-bold uppercase text-amber-800">
-                          ⚠️ Selfie Facial Pendente
-                        </p>
+                        <p className="text-xs font-bold uppercase text-amber-800">⚠️ Selfie Facial Pendente</p>
                         <button
                           type="button"
-                          onClick={() => abrirModalComHistorico('selfie')}
+                          onClick={abrirModalSelfie}
                           className="text-[11px] bg-floresta text-white px-2.5 py-1 rounded-lg font-bold shrink-0"
                         >
                           Enviar Selfie
                         </button>
                       </div>
-                      <h2 className="text-lg font-bold text-grafite mt-1">
-                        Olá, {usuarioLogado.nome_completo}
-                      </h2>
-                      <p className="text-xs text-gray-600">
-                        {usuarioLogado.unidade_formatada || usuarioLogado.unidade}
-                      </p>
+                      <h2 className="text-lg font-bold text-grafite mt-1">Olá, {usuarioLogado.nome_completo}</h2>
+                      <p className="text-xs text-gray-600">{usuarioLogado.unidade_formatada || usuarioLogado.unidade}</p>
                     </div>
                   ) : (
                     <div className="bg-emerald-50/70 border border-emerald-200 p-4 rounded-xl flex items-center justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="text-[11px] font-bold uppercase text-emerald-800">
-                          ✅ Acesso Facial Ativo
-                        </p>
-                        <h2 className="text-lg font-bold text-grafite truncate mt-0.5">
-                          Olá, {usuarioLogado.nome_completo}
-                        </h2>
-                        <p className="text-xs text-gray-600 truncate">
-                          {usuarioLogado.unidade_formatada || usuarioLogado.unidade}
-                        </p>
+                        <p className="text-[11px] font-bold uppercase text-emerald-800">✅ Acesso Facial Ativo</p>
+                        <h2 className="text-lg font-bold text-grafite truncate mt-0.5">Olá, {usuarioLogado.nome_completo}</h2>
+                        <p className="text-xs text-gray-600 truncate">{usuarioLogado.unidade_formatada || usuarioLogado.unidade}</p>
                       </div>
-
-                      <button
-                        type="button"
-                        onClick={() => abrirModalComHistorico('selfie')}
-                        title="Toque na foto para ampliar ou atualizar"
-                        className="shrink-0 group focus:outline-none"
-                      >
+                      <button type="button" onClick={abrirModalSelfie} className="shrink-0 group focus:outline-none">
                         {selfieTemporariaUrl ? (
                           <img
-                            key={usuarioLogado.perfil_id}
+                            key={usuarioLogado?.perfil_id}
                             src={selfieTemporariaUrl}
                             alt="Sua selfie"
                             className="w-16 h-16 rounded-full object-cover border-2 border-emerald-600 shadow-md group-hover:scale-105 transition"
@@ -440,42 +1434,55 @@ export default function VilaMarketApp() {
                   {/* Cards de Saldo */}
                   <div className="grid grid-cols-2 gap-3">
                     <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl">
-                      <span className="text-xs font-bold text-ambar uppercase">
-                        Saldo Cashback (2% Pix)
-                      </span>
+                      <span className="text-xs font-bold text-ambar uppercase">Saldo Cashback (2% Pix)</span>
                       <p className="text-2xl font-extrabold text-grafite mt-1">
-                        R${' '}
-                        {Number(
-                          perfilDetalhes?.saldo_cashback ?? usuarioLogado.saldo_cashback ?? 0
-                        ).toFixed(2)}
+                        R$ {Number(perfilDetalhes?.saldo_cashback ?? usuarioLogado.saldo_cashback ?? 0).toFixed(2)}
                       </p>
                     </div>
                     <div className="bg-gray-50 border border-gray-200 p-4 rounded-xl">
-                      <span className="text-xs font-bold text-gray-600 uppercase">
-                        Saldo Pré-Pago
-                      </span>
+                      <span className="text-xs font-bold text-gray-600 uppercase">Saldo Pré-Pago</span>
                       <p className="text-2xl font-extrabold text-grafite mt-1">
-                        R${' '}
-                        {Number(
-                          perfilDetalhes?.saldo_pre_pago ?? usuarioLogado.saldo_pre_pago ?? 0
-                        ).toFixed(2)}
+                        R$ {Number(perfilDetalhes?.saldo_pre_pago ?? usuarioLogado.saldo_pre_pago ?? 0).toFixed(2)}
                       </p>
                     </div>
                   </div>
 
-                  {/* Meus Dependentes */}
+                  {/* Atalho Rápido Scan & Go */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAbrirScanGoDireto(true);
+                      navegarParaAba('painel', 'estoque');
+                    }}
+                    className="w-full bg-floresta hover:bg-floresta-claro text-white p-3.5 rounded-2xl flex items-center justify-between shadow-sm transition"
+                  >
+                    <div className="flex items-center gap-3 text-left">
+                      <span className="text-2xl">📱</span>
+                      <div>
+                        <p className="text-sm font-bold">Scan & Go • Pagar pelo Celular</p>
+                        <p className="text-[11px] text-emerald-200">
+                          Escaneie o código de barras na prateleira sem fila
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-lg font-bold">›</span>
+                  </button>
+
+                  {/* Seção Meus Dependentes */}
                   {(roleUsuario === 'titular' || roleUsuario === 'admin') && (
                     <div className="pt-3 border-t border-gray-200 space-y-3">
                       <div className="flex items-center justify-between">
                         <div>
                           <h3 className="text-sm font-bold text-grafite">Meus Dependentes</h3>
-                          <p className="text-[11px] text-gray-500">
-                            Acesso facial e saldo individual (mín. 12 anos)
-                          </p>
+                          <p className="text-[11px] text-gray-500">Acesso facial e saldo individual (mín. 12 anos)</p>
                         </div>
                         <button
                           type="button"
-                          onClick={() => abrirModalComHistorico('novo_dependente')}
+                          onClick={() => {
+                            setDepSelfieBase64(null);
+                            setAceiteLgpdDependente(false);
+                            setModalAtivo('novo_dependente');
+                          }}
                           className="bg-floresta hover:bg-floresta-claro text-white text-xs font-bold px-3 py-2 rounded-xl transition"
                         >
                           + Adicionar
@@ -504,29 +1511,19 @@ export default function VilaMarketApp() {
                                       className="w-10 h-10 rounded-full object-cover border border-emerald-600 shrink-0"
                                     />
                                   ) : (
-                                    <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center text-xs font-bold text-amber-800 shrink-0">
+                                    <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-xs font-bold text-gray-600 shrink-0">
                                       👤
                                     </div>
                                   )}
                                   <div className="min-w-0">
                                     <div className="flex items-center gap-1.5">
-                                      <p className="text-sm font-bold text-grafite truncate">
-                                        {dep.nome_completo}
-                                      </p>
+                                      <p className="text-sm font-bold text-grafite truncate">{dep.nome_completo}</p>
                                       <span
                                         className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
-                                          depBloqueado
-                                            ? 'bg-red-100 text-red-700'
-                                            : dep.selfie_url
-                                            ? 'bg-emerald-100 text-emerald-800'
-                                            : 'bg-amber-100 text-amber-800'
+                                          depBloqueado ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-800'
                                         }`}
                                       >
-                                        {depBloqueado
-                                          ? 'Bloqueado'
-                                          : dep.selfie_url
-                                          ? 'Facial Ativo'
-                                          : 'Sem Selfie'}
+                                        {depBloqueado ? 'Bloqueado' : 'Ativo'}
                                       </span>
                                     </div>
                                     <p className="text-xs text-emerald-700 font-semibold">
@@ -534,28 +1531,13 @@ export default function VilaMarketApp() {
                                     </p>
                                   </div>
                                 </div>
-                                <div className="flex items-center gap-1.5 shrink-0">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setDependenteSelecionado(dep);
-                                      abrirModalComHistorico('pix_dependente');
-                                    }}
-                                    className="bg-ambar text-white text-[11px] font-bold px-2.5 py-1.5 rounded-xl transition"
-                                  >
-                                    + Saldo
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setDepGerenciando(dep);
-                                      abrirModalComHistorico('gerenciar_dependente');
-                                    }}
-                                    className="bg-gray-200 hover:bg-gray-300 text-gray-800 text-[11px] font-bold px-2.5 py-1.5 rounded-xl transition"
-                                  >
-                                    ⚙️ Gerenciar
-                                  </button>
-                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => abrirModalPixDependente(dep)}
+                                  className="bg-ambar text-white text-xs font-bold px-3 py-2 rounded-xl transition shrink-0"
+                                >
+                                  + Pix
+                                </button>
                               </div>
                             );
                           })}
@@ -566,24 +1548,84 @@ export default function VilaMarketApp() {
                 </>
               )}
 
-              {/* ABAS MURAL & CLASSIFICADOS */}
-              {(abaInferior === 'mural' || (abaInferior === 'classificados' && !ehMenorDeIdade)) && (
-                <AbaMuralClassificados
-                  abaAtiva={abaInferior}
-                  avisosLista={avisosLista}
-                  classificadosLista={classificadosLista}
+              {/* SUB-ABA ESTOQUE / LOJA (MODULARIZADA) */}
+              {abaInferior === 'estoque' && (
+                <AbaEstoqueScanGo
                   usuarioLogado={usuarioLogado}
                   perfilDetalhes={perfilDetalhes}
                   condominioId={condominioId}
-                  modalNovoAnuncioAberto={modalAtivo === 'novo_anuncio'}
-                  abrirModalNovoAnuncio={() => abrirModalComHistorico('novo_anuncio')}
-                  fecharModalNovoAnuncio={() => setModalAtivo(null)}
-                  onRecarregarDados={carregarMuralEClassificados}
-                  setMensagem={setMensagem}
+                  roleUsuario={roleUsuario}
+                  cpfLogin={cpf}
+                  onAtualizarDashboard={carregarDadosDashboard}
+                  onMensagem={setMensagem}
+                  carrinho={carrinhoScanGo}
+                  setCarrinho={setCarrinhoScanGo}
+                  abrirScanGoDireto={abrirScanGoDireto}
+                  onFecharScanGoDireto={() => setAbrirScanGoDireto(false)}
                 />
               )}
 
-              {/* ABA AJUDA */}
+              {/* SUB-ABA MURAL DE AVISOS */}
+              {abaInferior === 'mural' && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-lg font-bold text-grafite">Mural de Avisos</h2>
+                    <span className="text-[11px] font-bold bg-emerald-50 text-floresta px-2.5 py-1 rounded-full">
+                      {avisosLista.length} {avisosLista.length === 1 ? 'aviso' : 'avisos'}
+                    </span>
+                  </div>
+
+                  <div className="space-y-4">
+                    {avisosLista.length === 0 ? (
+                      <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl text-xs text-emerald-950 space-y-1">
+                        <p className="font-bold text-sm">🎉 Bem-vindo ao VilaMarket!</p>
+                        <p>
+                          Compre no minimercado autônomo usando Pix (no totem ou Scan & Go) e ganhe
+                          2% de cashback automático na sua carteira.
+                        </p>
+                      </div>
+                    ) : (
+                      avisosLista.map((aviso) => (
+                        <article
+                          key={aviso.id}
+                          className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm"
+                        >
+                          <div className="p-3.5 border-b border-gray-100 flex items-center gap-2">
+                            <span className="w-7 h-7 rounded-full bg-floresta text-white flex items-center justify-center text-xs font-bold">
+                              VM
+                            </span>
+                            <div>
+                              <p className="text-xs font-bold text-grafite">Administração VilaMarket</p>
+                              <p className="text-[10px] text-gray-400">
+                                {new Date(aviso.criado_em).toLocaleDateString('pt-BR')}
+                              </p>
+                            </div>
+                          </div>
+
+                          {aviso.imagem_url && (
+                            <div className="w-full bg-gray-100">
+                              <img
+                                src={aviso.imagem_url}
+                                alt={aviso.titulo}
+                                className="w-full h-auto max-h-[480px] object-contain mx-auto block"
+                              />
+                            </div>
+                          )}
+
+                          <div className="p-4 space-y-1.5">
+                            <h3 className="font-bold text-sm text-grafite">{aviso.titulo}</h3>
+                            <p className="text-xs text-gray-700 whitespace-pre-line leading-relaxed">
+                              {aviso.conteudo}
+                            </p>
+                          </div>
+                        </article>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* SUB-ABA AJUDA */}
               {abaInferior === 'ajuda' && (
                 <div className="space-y-4">
                   <h2 className="text-lg font-bold text-grafite">Como Usar o VilaMarket</h2>
@@ -599,18 +1641,19 @@ export default function VilaMarketApp() {
                     </div>
 
                     <div className="bg-gray-50 border border-gray-200 p-3.5 rounded-xl space-y-1">
-                      <p className="font-bold text-floresta">2. Pagamento no Caixa & Cashback 2%</p>
+                      <p className="font-bold text-floresta">2. Totem ou Scan & Go no Celular</p>
                       <p className="text-gray-600">
-                        Escaneie seus produtos no totem. Pagando via Pix você recebe 2% de volta na
-                        hora, ou pode usar seu Saldo Cashback e Saldo Pré-Pago digitando CPF + PIN.
+                        Você pode pagar no totem da loja ou escanear os produtos direto pelo celular
+                        na aba <strong>Estoque</strong>. Pagando via Pix você recebe 2% de cashback
+                        na hora.
                       </p>
                     </div>
 
                     <div className="bg-gray-50 border border-gray-200 p-3.5 rounded-xl space-y-1">
-                      <p className="font-bold text-floresta">3. Dependentes & Classificados</p>
+                      <p className="font-bold text-floresta">3. Dependentes & Controle Familiar</p>
                       <p className="text-gray-600">
                         Titulares podem cadastrar dependentes (a partir de 12 anos) com saldo pré-pago
-                        individual e anunciar produtos ou serviços nos Classificados da Vila.
+                        individual e acompanhar cada compra no extrato detalhado.
                       </p>
                     </div>
                   </div>
@@ -626,24 +1669,19 @@ export default function VilaMarketApp() {
                 </div>
               )}
 
-              {/* ABA PERFIL */}
+              {/* SUB-ABA PERFIL */}
               {abaInferior === 'perfil' && (
                 <div className="space-y-4">
                   <h2 className="text-lg font-bold text-grafite">Meu Perfil</h2>
 
                   <div className="bg-gray-50 border border-gray-200 p-4 rounded-xl flex items-center gap-3.5">
-                    <button
-                      type="button"
-                      onClick={() => abrirModalComHistorico('selfie')}
-                      className="relative shrink-0 group focus:outline-none"
-                      title="Toque na foto para ampliar ou atualizar"
-                    >
+                    <button type="button" onClick={abrirModalSelfie} className="relative shrink-0 group focus:outline-none">
                       {temSelfie && selfieTemporariaUrl ? (
                         <img
-                          key={usuarioLogado.perfil_id}
+                          key={`perfil_${usuarioLogado?.perfil_id}`}
                           src={selfieTemporariaUrl}
                           alt="Selfie do perfil"
-                          className="w-16 h-16 rounded-full object-cover border-2 border-floresta shadow-sm group-hover:opacity-90 transition"
+                          className="w-16 h-16 rounded-full object-cover border-2 border-floresta shadow-sm"
                         />
                       ) : (
                         <div className="w-16 h-16 rounded-full bg-amber-100 border-2 border-amber-400 flex items-center justify-center text-2xl">
@@ -653,16 +1691,10 @@ export default function VilaMarketApp() {
                     </button>
 
                     <div className="text-xs space-y-1 text-gray-700 min-w-0">
-                      <p className="font-bold text-sm text-grafite truncate">
-                        {usuarioLogado.nome_completo}
-                      </p>
-                      <p className="text-gray-600 truncate">
-                        {usuarioLogado.unidade_formatada || usuarioLogado.unidade}
-                      </p>
+                      <p className="font-bold text-sm text-grafite truncate">{usuarioLogado.nome_completo}</p>
+                      <p className="text-gray-600 truncate">{usuarioLogado.unidade_formatada || usuarioLogado.unidade}</p>
                       <p className="text-[11px] font-semibold text-emerald-700">
-                        {temSelfie
-                          ? '✅ Facial ativo (toque na foto para ampliar)'
-                          : '⚠️ Selfie pendente para porta'}
+                        {temSelfie ? '✅ Facial ativo (toque na foto para ampliar)' : '⚠️ Selfie pendente para porta'}
                       </p>
                     </div>
                   </div>
@@ -670,20 +1702,14 @@ export default function VilaMarketApp() {
                   <div className="space-y-2">
                     <button
                       type="button"
-                      onClick={() => abrirModalComHistorico('selfie')}
+                      onClick={abrirModalSelfie}
                       className="w-full flex items-center justify-between p-3.5 bg-white hover:bg-emerald-50/60 border border-gray-200 rounded-xl transition text-left"
                     >
                       <div className="flex items-center gap-3">
                         <span className="text-xl">📷</span>
                         <div>
-                          <p className="text-xs font-bold text-grafite">
-                            Minha Selfie (Acesso Facial)
-                          </p>
-                          <p className="text-[11px] text-gray-500">
-                            {temSelfie
-                              ? 'Conferir foto atual ou capturar nova'
-                              : 'Cadastrar foto do rosto para liberar a porta'}
-                          </p>
+                          <p className="text-xs font-bold text-grafite">Minha Selfie (Acesso Facial)</p>
+                          <p className="text-[11px] text-gray-500">Conferir foto atual ou capturar nova</p>
                         </div>
                       </div>
                       <span className="text-gray-400 text-xs">›</span>
@@ -691,16 +1717,14 @@ export default function VilaMarketApp() {
 
                     <button
                       type="button"
-                      onClick={() => abrirModalComHistorico('pin')}
+                      onClick={() => setModalAtivo('pin')}
                       className="w-full flex items-center justify-between p-3.5 bg-white hover:bg-emerald-50/60 border border-gray-200 rounded-xl transition text-left"
                     >
                       <div className="flex items-center gap-3">
                         <span className="text-xl">🔐</span>
                         <div>
                           <p className="text-xs font-bold text-grafite">Alterar PIN (4 dígitos)</p>
-                          <p className="text-[11px] text-gray-500">
-                            Senha numérica do aplicativo e do caixa
-                          </p>
+                          <p className="text-[11px] text-gray-500">Senha numérica do app, Scan & Go e caixa</p>
                         </div>
                       </div>
                       <span className="text-gray-400 text-xs">›</span>
@@ -714,12 +1738,8 @@ export default function VilaMarketApp() {
                       <div className="flex items-center gap-3">
                         <span className="text-xl">📄</span>
                         <div>
-                          <p className="text-xs font-bold text-grafite">
-                            Extrato & Histórico Cashback
-                          </p>
-                          <p className="text-[11px] text-gray-500">
-                            Acompanhe recargas, compras e bônus de 2%
-                          </p>
+                          <p className="text-xs font-bold text-grafite">Extrato & Recibos Detalhados</p>
+                          <p className="text-[11px] text-gray-500">Itens comprados, cashback e recibos NFC-e</p>
                         </div>
                       </div>
                       <span className="text-gray-400 text-xs">›</span>
@@ -730,12 +1750,8 @@ export default function VilaMarketApp() {
                     type="button"
                     onClick={() => {
                       limparSessaoDoNavegador();
-                      try { sessionStorage.clear(); } catch {}
                       setUsuarioLogado(null);
-                      setPerfilDetalhes(null);
-                      setSelfieTemporariaUrl(null);
-                      setDependentesLista([]);
-                      setDependentesSelfiesMap({});
+                      setPin('');
                       navegarParaAba('login');
                     }}
                     className="w-full py-3 text-xs font-bold text-gray-700 border border-gray-300 rounded-xl hover:bg-gray-50"
@@ -744,9 +1760,6 @@ export default function VilaMarketApp() {
                   </button>
 
                   <div className="pt-2 border-t border-gray-200 text-center space-y-2">
-                    <p className="text-[11px] text-gray-400">
-                      Dados protegidos em banco privado do VilaMarket conforme a LGPD.
-                    </p>
                     <button
                       type="button"
                       onClick={solicitarExclusaoDadosLgpd}
@@ -759,73 +1772,508 @@ export default function VilaMarketApp() {
                 </div>
               )}
 
-              {/* ABA ADMIN */}
+              {/* SUB-ABA ADMIN (MORADORES & MURAL) */}
               {abaInferior === 'admin' && roleUsuario === 'admin' && (
-                <AbaAdmin
-                  usuarioLogado={usuarioLogado}
-                  perfilDetalhes={perfilDetalhes}
-                  condominioId={condominioId}
-                  gerarUrlTemporariaSelfie={gerarUrlTemporariaSelfie}
-                  onAtualizarMuralEClassificados={carregarMuralEClassificados}
-                />
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-lg font-bold text-grafite">Painel Admin</h2>
+                    <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                      {adminMoradores.length} cadastros
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-1.5 bg-gray-100 p-1 rounded-xl">
+                    <button
+                      type="button"
+                      onClick={() => setAdminSecao('moradores')}
+                      className={`py-2 text-xs font-bold rounded-lg transition ${
+                        adminSecao === 'moradores' ? 'bg-floresta text-white' : 'text-gray-600'
+                      }`}
+                    >
+                      Moradores
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAdminSecao('mural')}
+                      className={`py-2 text-xs font-bold rounded-lg transition ${
+                        adminSecao === 'mural' ? 'bg-floresta text-white' : 'text-gray-600'
+                      }`}
+                    >
+                      Mural Avisos
+                    </button>
+                  </div>
+
+                  {adminSecao === 'moradores' && (
+                    <div className="space-y-3">
+                      <input
+                        type="text"
+                        placeholder="Buscar por nome, CPF ou bloco/casa..."
+                        value={adminBuscaMorador}
+                        onChange={(e) => setAdminBuscaMorador(e.target.value)}
+                        className="w-full p-2.5 border rounded-xl text-xs"
+                      />
+
+                      <div className="flex gap-1 overflow-x-auto pb-1">
+                        {[
+                          { id: 'todos', label: 'Todos' },
+                          { id: 'aprovado', label: 'Ativos' },
+                          { id: 'bloqueado', label: 'Bloqueados' },
+                          { id: 'sem_selfie', label: 'Sem Foto' },
+                        ].map((f) => (
+                          <button
+                            key={f.id}
+                            type="button"
+                            onClick={() => setAdminFiltroStatus(f.id as any)}
+                            className={`px-2.5 py-1 rounded-full text-[11px] font-bold ${
+                              adminFiltroStatus === f.id ? 'bg-floresta text-white' : 'bg-gray-100 text-gray-600'
+                            }`}
+                          >
+                            {f.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="space-y-2.5 max-h-[460px] overflow-y-auto pr-0.5">
+                        {adminMoradoresFiltrados.map((m) => {
+                          const bloqueado = m.status_cadastro === 'bloqueado';
+                          return (
+                            <div
+                              key={m.id}
+                              className={`p-3 rounded-xl border text-xs space-y-2 ${
+                                bloqueado ? 'bg-red-50/60 border-red-200' : 'bg-gray-50 border-gray-200'
+                              }`}
+                            >
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <p className="font-bold text-grafite truncate">{m.nome_completo}</p>
+                                  <span className="text-[9px] uppercase font-bold px-1.5 py-0.5 rounded bg-gray-200 text-gray-700">
+                                    {m.role}
+                                  </span>
+                                  <span
+                                    className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                                      bloqueado ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-800'
+                                    }`}
+                                  >
+                                    {bloqueado ? 'Bloqueado' : 'Ativo'}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-gray-600 truncate mt-0.5">{m.unidade_formatada || 'Sem unidade'}</p>
+                                <p className="text-[10px] text-gray-500">CPF: {m.cpf} • WA: {m.whatsapp || 'N/I'}</p>
+                              </div>
+
+                              <div className="grid grid-cols-3 gap-1.5 pt-1">
+                                <button
+                                  type="button"
+                                  onClick={() => adminAlternarBloqueioMorador(m)}
+                                  className={`py-1.5 rounded-lg font-bold text-[11px] ${
+                                    bloqueado ? 'bg-emerald-600 text-white' : 'bg-red-100 text-red-700'
+                                  }`}
+                                >
+                                  {bloqueado ? 'Desbloquear' : 'Bloquear'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => adminAbrirEdicaoMorador(m)}
+                                  className="py-1.5 rounded-lg font-bold text-[11px] bg-white border border-gray-300 text-grafite"
+                                >
+                                  Dados / Editar
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => adminVisualizarSelfieMorador(m)}
+                                  disabled={!m.selfie_url}
+                                  className={`py-1.5 rounded-lg font-bold text-[11px] ${
+                                    m.selfie_url ? 'bg-amber-100 text-amber-900' : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                  }`}
+                                >
+                                  {m.selfie_url ? 'Ver Foto' : 'Sem Foto'}
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {adminSecao === 'mural' && (
+                    <div className="space-y-4">
+                      <form onSubmit={adminSalvarAvisoMural} className="bg-gray-50 border border-gray-200 p-3.5 rounded-xl space-y-2.5">
+                        <h3 className="text-xs font-bold text-grafite">
+                          {adminAvisoEditId ? '✏️ Editar Aviso do Mural' : '📢 Novo Aviso no Feed'}
+                        </h3>
+                        <input
+                          type="text"
+                          required
+                          placeholder="Título do aviso (ex: Reposição de Pães Frescos!)"
+                          value={adminAvisoTitulo}
+                          onChange={(e) => setAdminAvisoTitulo(e.target.value)}
+                          className="w-full p-2 border rounded-xl text-xs bg-white"
+                        />
+                        <textarea
+                          rows={3}
+                          required
+                          placeholder="Escreva o comunicado para os moradores..."
+                          value={adminAvisoConteudo}
+                          onChange={(e) => setAdminAvisoConteudo(e.target.value)}
+                          className="w-full p-2 border rounded-xl text-xs bg-white"
+                        />
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0] || null;
+                            setAdminAvisoFotoFile(file);
+                            if (file) setAdminAvisoFotoPreview(URL.createObjectURL(file));
+                          }}
+                          className="w-full text-[11px]"
+                        />
+                        {adminAvisoFotoPreview && (
+                          <img src={adminAvisoFotoPreview} alt="Preview" className="w-full max-h-40 object-contain rounded-lg border bg-white" />
+                        )}
+                        <button type="submit" disabled={carregando} className="w-full py-2 rounded-xl text-xs font-bold bg-floresta text-white">
+                          {carregando ? 'Salvando...' : adminAvisoEditId ? 'Salvar Alterações' : 'Publicar no Feed'}
+                        </button>
+                      </form>
+
+                      <div className="space-y-2">
+                        {avisosLista.map((av) => (
+                          <div key={av.id} className="p-3 bg-white border border-gray-200 rounded-xl text-xs space-y-2">
+                            <p className="font-bold text-grafite">{av.titulo}</p>
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setAdminAvisoEditId(av.id);
+                                  setAdminAvisoTitulo(av.titulo);
+                                  setAdminAvisoConteudo(av.conteudo);
+                                  setAdminAvisoFotoPreview(av.imagem_url || null);
+                                }}
+                                className="py-1.5 rounded-lg font-bold text-[11px] bg-gray-100 text-grafite"
+                              >
+                                Editar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => adminExcluirAvisoMural(av.id)}
+                                className="py-1.5 rounded-lg font-bold text-[11px] bg-red-50 text-red-600"
+                              >
+                                Remover
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           )}
         </div>
       </div>
 
-      {/* MODAIS DE DEPENDENTES */}
-      <ModaisDependentes
-        modalAtivo={modalAtivo}
-        fecharModal={() => setModalAtivo(null)}
-        usuarioLogado={usuarioLogado}
-        perfilDetalhes={perfilDetalhes}
-        condominioId={condominioId}
-        depGerenciando={depGerenciando}
-        dependenteSelecionado={dependenteSelecionado}
-        dependentesSelfiesMap={dependentesSelfiesMap}
-        enviarSelfieParaStoragePrivado={enviarSelfieParaStoragePrivado}
-        onAtualizarListaDependentes={async (novoDep, fotoBase64) => {
-          if (novoDep) {
-            setDependentesLista((prev) => [...prev, novoDep]);
-            if (fotoBase64) {
-              setDependentesSelfiesMap((prev) => ({ ...prev, [novoDep.id]: fotoBase64 }));
-            }
-          }
-          await carregarDadosDashboard();
-        }}
-      />
+      {/* MODAL EXTRATO DETALHADO */}
+      {modalAtivo === 'extrato' && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4 max-h-[82vh] flex flex-col">
+            <h3 className="font-bold text-base text-grafite">Extrato Detalhado & Recibos</h3>
+            <div className="overflow-y-auto space-y-2.5 flex-1">
+              {extratoLista.length === 0 ? (
+                <p className="text-xs text-gray-500 text-center py-6">Nenhuma transação registrada ainda.</p>
+              ) : (
+                extratoLista.map((item) => {
+                  const temItens = Array.isArray(item.itens_json) && item.itens_json.length > 0;
+                  const aberto = transacaoExpandidaId === item.id;
+                  return (
+                    <div key={item.id} className="border rounded-xl p-2.5 text-xs space-y-1.5 bg-gray-50/70">
+                      <div
+                        onClick={() => temItens && setTransacaoExpandidaId(aberto ? null : item.id)}
+                        className={`flex justify-between items-center ${temItens ? 'cursor-pointer' : ''}`}
+                      >
+                        <div>
+                          <p className="font-bold text-grafite">{item.descricao || item.tipo}</p>
+                          <p className="text-[10px] text-gray-400">
+                            {new Date(item.criado_em).toLocaleString('pt-BR')}
+                            {temItens && ' • Toque para ver itens'}
+                          </p>
+                        </div>
+                        <span className={`font-bold ${Number(item.valor) >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+                          R$ {Number(item.valor).toFixed(2)}
+                        </span>
+                      </div>
 
-      {/* MODAIS DO PERFIL (SELFIE, PIN, EXTRATO) */}
-      <ModaisPerfil
-        modalAtivo={modalAtivo}
-        fecharModal={() => setModalAtivo(null)}
-        usuarioLogado={usuarioLogado}
-        temSelfie={temSelfie}
-        selfieTemporariaUrl={selfieTemporariaUrl}
-        extratoLista={extratoLista}
-        enviarSelfieParaStoragePrivado={enviarSelfieParaStoragePrivado}
-        onSelfieAtualizada={(caminhoPrivado, fotoSalva) => {
-          setSelfieTemporariaUrl(fotoSalva);
-          setPerfilDetalhes((prev: any) => ({
-            ...(prev || {}),
-            selfie_url: caminhoPrivado,
-            status_facial: 'ativo',
-          }));
-          const atualizado = {
-            ...usuarioLogado,
-            selfie_url: caminhoPrivado,
-            status_facial: 'ativo',
-          };
-          setUsuarioLogado(atualizado);
-          salvarSessaoNoNavegador(atualizado);
-          setMensagem({
-            tipo: 'sucesso',
-            texto: '✅ Selfie salva e sincronizada! Seu acesso facial na porta já está ativo.',
-          });
-          carregarDadosDashboard();
-        }}
-      />
+                      {aberto && temItens && (
+                        <div className="pt-2 border-t border-gray-200 space-y-1 text-[11px] text-gray-700">
+                          {item.itens_json.map((prod: any, idx: number) => (
+                            <div key={idx} className="flex justify-between">
+                              <span>
+                                {prod.quantidade}x {prod.nome}
+                              </span>
+                              <span>R$ {(Number(prod.preco_unitario) * Number(prod.quantidade)).toFixed(2)}</span>
+                            </div>
+                          ))}
+                          {item.chave_nfce && (
+                            <p className="text-[10px] text-emerald-800 font-semibold pt-1">
+                              🧾 Recibo Digital / NFC-e: {item.chave_nfce}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setModalAtivo(null)}
+              className="w-full bg-gray-100 text-gray-800 font-bold py-2.5 rounded-xl text-xs"
+            >
+              Fechar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL ADMIN: EDITAR MORADOR */}
+      {adminEditandoMorador && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4">
+            <h3 className="font-bold text-base text-grafite">
+              {adminFotoAmpliadaUrl ? 'Foto Facial do Morador' : 'Editar Dados do Morador'}
+            </h3>
+            {adminFotoAmpliadaUrl ? (
+              <div className="space-y-3 text-center">
+                <p className="text-xs font-bold text-gray-700">{adminEditandoMorador.nome_completo}</p>
+                <img src={adminFotoAmpliadaUrl} alt="Selfie" className="w-64 h-64 mx-auto object-cover rounded-2xl border-2 border-floresta" />
+                <button
+                  type="button"
+                  onClick={() => adminRemoverFotoMorador(adminEditandoMorador)}
+                  disabled={carregando}
+                  className="w-full bg-red-600 text-white font-bold py-2.5 rounded-xl text-xs"
+                >
+                  🗑️ Remover Foto (Solicitar Nova Selfie)
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={adminSalvarEdicaoMorador} className="space-y-3">
+                <input
+                  type="text"
+                  required
+                  value={adminEditNome}
+                  onChange={(e) => setAdminEditNome(formatarNomeTitleCase(e.target.value))}
+                  className="w-full p-2.5 border rounded-xl text-xs"
+                />
+                <input
+                  type="text"
+                  value={adminEditWhatsapp}
+                  onChange={(e) => setAdminEditWhatsapp(e.target.value)}
+                  className="w-full p-2.5 border rounded-xl text-xs"
+                />
+                <input
+                  type="text"
+                  value={adminEditUnidade}
+                  onChange={(e) => setAdminEditUnidade(e.target.value)}
+                  className="w-full p-2.5 border rounded-xl text-xs"
+                />
+                <select
+                  value={adminEditStatus}
+                  onChange={(e) => setAdminEditStatus(e.target.value)}
+                  className="w-full p-2.5 border rounded-xl text-xs bg-white"
+                >
+                  <option value="aprovado">Aprovado (Ativo)</option>
+                  <option value="bloqueado">Bloqueado</option>
+                  <option value="pendente_aprovacao">Pendente</option>
+                </select>
+                <button type="submit" disabled={carregando} className="w-full bg-floresta text-white font-bold py-2.5 rounded-xl text-xs">
+                  Salvar Alterações
+                </button>
+              </form>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setAdminEditandoMorador(null);
+                setAdminFotoAmpliadaUrl(null);
+              }}
+              className="w-full text-xs text-gray-500 py-1"
+            >
+              Fechar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL SELFIE */}
+      {modalAtivo === 'selfie' && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4">
+            <h3 className="font-bold text-base text-grafite">Minha Selfie (Acesso Facial)</h3>
+            {temSelfie && !modoTrocaSelfie && !fotoCapturada ? (
+              <div className="space-y-3 text-center">
+                {selfieTemporariaUrl && (
+                  <img
+                    key={`modal_${usuarioLogado?.perfil_id}`}
+                    src={selfieTemporariaUrl}
+                    alt="Selfie"
+                    className="w-64 h-64 mx-auto object-cover rounded-2xl border-2 border-emerald-600"
+                  />
+                )}
+                <button type="button" onClick={iniciarCameraSelfie} className="w-full bg-floresta text-white font-bold py-3 rounded-xl text-xs">
+                  📷 Tirar Nova Foto / Atualizar Selfie
+                </button>
+              </div>
+            ) : !fotoCapturada ? (
+              <div className="space-y-3">
+                <div className="p-2.5 rounded-xl text-xs font-semibold text-center border bg-amber-50 text-amber-800">
+                  {qualidadeCamera.mensagem}
+                </div>
+                <div className="relative aspect-square max-w-[230px] mx-auto w-full rounded-xl overflow-hidden bg-black">
+                  <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover scale-x-[-1]" />
+                  <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                    <div className={`w-40 h-52 rounded-full border-4 border-dashed ${qualidadeCamera.aprovada ? 'border-emerald-400' : 'border-amber-400'}`} />
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => capturarFrameSelfie(false)}
+                  disabled={!qualidadeCamera.aprovada}
+                  className={`w-full font-bold py-3 rounded-xl text-xs ${qualidadeCamera.aprovada ? 'bg-floresta text-white' : 'bg-gray-300 text-gray-500'}`}
+                >
+                  {qualidadeCamera.aprovada ? '📸 Capturar Foto Agora' : 'Ajuste o rosto/luz para liberar'}
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <img src={fotoCapturada} alt="Nova selfie" className="w-full h-64 object-cover rounded-xl border scale-x-[-1]" />
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" onClick={iniciarCameraSelfie} className="bg-gray-200 text-gray-800 font-bold py-2.5 rounded-xl text-xs">
+                    Tirar Outra
+                  </button>
+                  <button type="button" onClick={salvarSelfieMorador} disabled={carregando} className="bg-floresta text-white font-bold py-2.5 rounded-xl text-xs">
+                    Confirmar e Salvar
+                  </button>
+                </div>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                fecharCamera();
+                setModoTrocaSelfie(false);
+                setModalAtivo(null);
+              }}
+              className="w-full text-xs text-gray-500 py-1"
+            >
+              Fechar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL ALTERAR PIN */}
+      {modalAtivo === 'pin' && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <form onSubmit={salvarTrocaPinLogado} className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-3">
+            <h3 className="font-bold text-base text-grafite">Alterar PIN de 4 dígitos</h3>
+            <input type="password" maxLength={4} required placeholder="PIN Atual" value={pinAtualTroca} onChange={(e) => setPinAtualTroca(e.target.value.replace(/\D/g, ''))} className="w-full p-2.5 border rounded-xl text-center text-sm" />
+            <input type="password" maxLength={4} required placeholder="Novo PIN" value={novoPinTroca} onChange={(e) => setNovoPinTroca(e.target.value.replace(/\D/g, ''))} className="w-full p-2.5 border rounded-xl text-center text-sm" />
+            <input type="password" maxLength={4} required placeholder="Confirmar Novo PIN" value={confirmarNovoPinTroca} onChange={(e) => setConfirmarNovoPinTroca(e.target.value.replace(/\D/g, ''))} className="w-full p-2.5 border rounded-xl text-center text-sm" />
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <button type="button" onClick={() => setModalAtivo(null)} className="bg-gray-100 text-gray-700 font-bold py-2.5 rounded-xl text-xs">Cancelar</button>
+              <button type="submit" disabled={carregando} className="bg-floresta text-white font-bold py-2.5 rounded-xl text-xs">Salvar PIN</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* MODAL NOVO DEPENDENTE */}
+      {modalAtivo === 'novo_dependente' && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <form onSubmit={cadastrarDependente} className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-3 my-auto">
+            <h3 className="font-bold text-base text-grafite">Adicionar Dependente</h3>
+            <input type="text" required placeholder="Nome Completo" value={depNome} onChange={(e) => setDepNome(formatarNomeTitleCase(e.target.value))} className="w-full p-2.5 border rounded-xl text-xs" />
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={14}
+                required
+                placeholder="000.000.000-00"
+                value={depCpf}
+                onChange={(e) => setDepCpf(formatarCPFVisual(e.target.value))}
+                className="w-full p-2.5 border rounded-xl text-xs"
+              />
+              <input type="date" required value={depNascimento} onChange={(e) => setDepNascimento(e.target.value)} className="w-full p-2.5 border rounded-xl text-xs" />
+            </div>
+            <input type="password" maxLength={4} required placeholder="PIN de 4 dígitos" value={depPin} onChange={(e) => setDepPin(e.target.value.replace(/\D/g, ''))} className="w-full p-2.5 border rounded-xl text-xs" />
+            <div className="border rounded-xl p-3 bg-gray-50 text-center space-y-2">
+              {!depSelfieBase64 ? (
+                streamCamera ? (
+                  <div className="space-y-2">
+                    <div className="relative aspect-square max-w-[200px] mx-auto w-full rounded-xl overflow-hidden bg-black">
+                      <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover scale-x-[-1]" />
+                    </div>
+                    <button type="button" onClick={() => capturarFrameSelfie(true)} disabled={!qualidadeCamera.aprovada} className="bg-floresta text-white text-xs font-bold px-4 py-2 rounded-lg w-full">
+                      📸 Capturar Foto
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 480, height: 480 } });
+                      setStreamCamera(s);
+                      setTimeout(() => {
+                        if (videoRef.current) {
+                          videoRef.current.srcObject = s;
+                          iniciarMonitoramentoQualidade();
+                        }
+                      }, 150);
+                    }}
+                    className="text-xs font-bold text-floresta underline"
+                  >
+                    📷 Tirar Selfie do Dependente
+                  </button>
+                )
+              ) : (
+                <img src={depSelfieBase64} alt="Selfie Dependente" className="w-20 h-20 rounded-full mx-auto object-cover border scale-x-[-1]" />
+              )}
+            </div>
+            <label className="flex items-start gap-2 bg-gray-50 p-2.5 rounded-xl border text-[10px] text-gray-600">
+              <input type="checkbox" checked={aceiteLgpdDependente} onChange={(e) => setAceiteLgpdDependente(e.target.checked)} className="mt-0.5 accent-floresta" />
+              <span>Autorizo o tratamento da imagem facial do dependente (Art. 14 da LGPD).</span>
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => { fecharCamera(); setModalAtivo(null); }} className="bg-gray-100 text-gray-700 font-bold py-2.5 rounded-xl text-xs">Cancelar</button>
+              <button type="submit" disabled={carregando} className="bg-floresta text-white font-bold py-2.5 rounded-xl text-xs">Salvar</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* MODAL PIX DEPENDENTE */}
+      {modalAtivo === 'pix_dependente' && dependenteSelecionado && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4">
+            <h3 className="font-bold text-base text-grafite">Adicionar Saldo Pix • {dependenteSelecionado.nome_completo}</h3>
+            <div className="grid grid-cols-3 gap-2">
+              {['20.00', '50.00', '100.00'].map((v) => (
+                <button key={v} type="button" onClick={() => setValorPix(v)} className={`py-2 rounded-lg text-xs font-bold border ${valorPix === v ? 'bg-floresta text-white' : 'bg-gray-50 text-gray-700'}`}>
+                  R$ {v}
+                </button>
+              ))}
+            </div>
+            <input type="number" step="0.01" value={valorPix} onChange={(e) => setValorPix(e.target.value)} className="w-full p-2.5 border rounded-xl text-sm font-bold" />
+            <input type="password" maxLength={4} placeholder="Seu PIN de 4 dígitos" value={pinConfirmacaoPix} onChange={(e) => setPinConfirmacaoPix(e.target.value.replace(/\D/g, ''))} className="w-full p-2.5 border rounded-xl text-center text-sm tracking-widest" />
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => setModalAtivo(null)} className="bg-gray-100 text-gray-700 font-bold py-2.5 rounded-xl text-xs">Cancelar</button>
+              <button type="button" onClick={confirmarRecargaPixDependente} disabled={carregando} className="bg-floresta text-white font-bold py-2.5 rounded-xl text-xs">Confirmar Pix</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* BARRA DE NAVEGAÇÃO INFERIOR */}
       {aba === 'painel' && usuarioLogado && (
@@ -835,9 +2283,7 @@ export default function VilaMarketApp() {
               type="button"
               onClick={() => navegarParaAba('painel', 'inicio')}
               className={`flex-1 min-h-[48px] px-1 py-1.5 rounded-xl flex flex-col items-center justify-center transition ${
-                abaInferior === 'inicio'
-                  ? 'bg-emerald-50 text-floresta font-bold'
-                  : 'text-gray-500 hover:bg-gray-50'
+                abaInferior === 'inicio' ? 'bg-emerald-50 text-floresta font-bold' : 'text-gray-500 hover:bg-gray-50'
               }`}
             >
               <span className="text-base leading-none">🏠</span>
@@ -846,39 +2292,36 @@ export default function VilaMarketApp() {
 
             <button
               type="button"
+              onClick={() => navegarParaAba('painel', 'estoque')}
+              className={`relative flex-1 min-h-[48px] px-1 py-1.5 rounded-xl flex flex-col items-center justify-center transition ${
+                abaInferior === 'estoque' ? 'bg-emerald-50 text-floresta font-bold' : 'text-gray-500 hover:bg-gray-50'
+              }`}
+            >
+              <span className="text-base leading-none">🛒</span>
+              <span className="text-[10px] mt-1">Estoque</span>
+              {qtdItensCarrinho > 0 && (
+                <span className="absolute top-1 right-2 bg-ambar text-white text-[9px] font-bold px-1.5 rounded-full">
+                  {qtdItensCarrinho}
+                </span>
+              )}
+            </button>
+
+            <button
+              type="button"
               onClick={() => navegarParaAba('painel', 'mural')}
               className={`flex-1 min-h-[48px] px-1 py-1.5 rounded-xl flex flex-col items-center justify-center transition ${
-                abaInferior === 'mural'
-                  ? 'bg-emerald-50 text-floresta font-bold'
-                  : 'text-gray-500 hover:bg-gray-50'
+                abaInferior === 'mural' ? 'bg-emerald-50 text-floresta font-bold' : 'text-gray-500 hover:bg-gray-50'
               }`}
             >
               <span className="text-base leading-none">📢</span>
               <span className="text-[10px] mt-1">Mural</span>
             </button>
 
-            {!ehMenorDeIdade && (
-              <button
-                type="button"
-                onClick={() => navegarParaAba('painel', 'classificados')}
-                className={`flex-1 min-h-[48px] px-1 py-1.5 rounded-xl flex flex-col items-center justify-center transition ${
-                  abaInferior === 'classificados'
-                    ? 'bg-emerald-50 text-floresta font-bold'
-                    : 'text-gray-500 hover:bg-gray-50'
-                }`}
-              >
-                <span className="text-base leading-none">🏷️</span>
-                <span className="text-[10px] mt-1">Anúncios</span>
-              </button>
-            )}
-
             <button
               type="button"
               onClick={() => navegarParaAba('painel', 'ajuda')}
               className={`flex-1 min-h-[48px] px-1 py-1.5 rounded-xl flex flex-col items-center justify-center transition ${
-                abaInferior === 'ajuda'
-                  ? 'bg-emerald-50 text-floresta font-bold'
-                  : 'text-gray-500 hover:bg-gray-50'
+                abaInferior === 'ajuda' ? 'bg-emerald-50 text-floresta font-bold' : 'text-gray-500 hover:bg-gray-50'
               }`}
             >
               <span className="text-base leading-none">❓</span>
@@ -889,9 +2332,7 @@ export default function VilaMarketApp() {
               type="button"
               onClick={() => navegarParaAba('painel', 'perfil')}
               className={`flex-1 min-h-[48px] px-1 py-1.5 rounded-xl flex flex-col items-center justify-center transition ${
-                abaInferior === 'perfil'
-                  ? 'bg-emerald-50 text-floresta font-bold'
-                  : 'text-gray-500 hover:bg-gray-50'
+                abaInferior === 'perfil' ? 'bg-emerald-50 text-floresta font-bold' : 'text-gray-500 hover:bg-gray-50'
               }`}
             >
               <span className="text-base leading-none">👤</span>
@@ -903,9 +2344,7 @@ export default function VilaMarketApp() {
                 type="button"
                 onClick={() => navegarParaAba('painel', 'admin')}
                 className={`flex-1 min-h-[48px] px-1 py-1.5 rounded-xl flex flex-col items-center justify-center transition ${
-                  abaInferior === 'admin'
-                    ? 'bg-emerald-50 text-floresta font-bold'
-                    : 'text-gray-500 hover:bg-gray-50'
+                  abaInferior === 'admin' ? 'bg-emerald-50 text-floresta font-bold' : 'text-gray-500 hover:bg-gray-50'
                 }`}
               >
                 <span className="text-base leading-none">⚙️</span>
