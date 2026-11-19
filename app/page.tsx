@@ -923,26 +923,17 @@ export default function VilaMarketApp() {
         imagemFinalUrl = await enviarFotoPublicaComunidade(adminAvisoFotoFile, 'mural');
       }
 
-      if (adminAvisoEditId) {
-        const { error } = await supabase
-          .from('avisos_mural')
-          .update({
-            titulo: adminAvisoTitulo.trim(),
-            conteudo: adminAvisoConteudo.trim(),
-            imagem_url: imagemFinalUrl || null,
-          })
-          .eq('id', adminAvisoEditId);
-        if (error) throw new Error(error.message);
-      } else {
-        const { error } = await supabase.from('avisos_mural').insert({
-          condominio_id: cId || null,
-          autor_id: usuarioLogado.perfil_id,
-          titulo: adminAvisoTitulo.trim(),
-          conteudo: adminAvisoConteudo.trim(),
-          imagem_url: imagemFinalUrl || null,
-          fixado: false,
-        });
-        if (error) throw new Error(error.message);
+      const { data, error } = await supabase.rpc('admin_salvar_aviso_mural', {
+        p_admin_id: usuarioLogado.perfil_id,
+        p_aviso_id: adminAvisoEditId || null,
+        p_condominio_id: cId || null,
+        p_titulo: adminAvisoTitulo.trim(),
+        p_conteudo: adminAvisoConteudo.trim(),
+        p_imagem_url: imagemFinalUrl || null,
+      });
+
+      if (error || !data?.sucesso) {
+        throw new Error(error?.message || data?.mensagem || 'Erro ao salvar aviso.');
       }
 
       setAdminAvisoEditId(null);
@@ -956,6 +947,19 @@ export default function VilaMarketApp() {
       alert('Erro ao salvar aviso: ' + err.message);
     } finally {
       setCarregando(false);
+    }
+  }
+
+  async function adminExcluirAvisoMural(id: string) {
+    if (!window.confirm('Excluir este aviso do Mural?')) return;
+    const { data, error } = await supabase.rpc('admin_excluir_aviso_mural', {
+      p_admin_id: usuarioLogado.perfil_id,
+      p_aviso_id: id,
+    });
+    if (!error && data?.sucesso) {
+      await carregarDadosAdmin();
+    } else {
+      alert(error?.message || data?.mensagem || 'Erro ao excluir aviso.');
     }
   }
 
