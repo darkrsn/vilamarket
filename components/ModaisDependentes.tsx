@@ -49,6 +49,9 @@ export default function ModaisDependentes({
   const [valorPix, setValorPix] = useState('20.00');
   const [pinConfirmacaoPix, setPinConfirmacaoPix] = useState('');
 
+  const depDataCompleta = Boolean(depNascimento && depNascimento.split('-')[0]?.length === 4);
+  const depMenorDe12 = depDataCompleta && calcularIdade(depNascimento) < 12;
+
   async function cadastrarDependente(e: React.FormEvent) {
     e.preventDefault();
     const cpfDepLimpo = depCpf.replace(/\D/g, '');
@@ -56,8 +59,8 @@ export default function ModaisDependentes({
       alert('Digite os 11 dígitos completos do CPF do dependente.');
       return;
     }
-    if (calcularIdade(depNascimento) < 12) {
-      alert('A idade mínima para cadastro de dependente é de 12 anos.');
+    if (!depNascimento || calcularIdade(depNascimento) < 12) {
+      alert('O cadastro de dependente é permitido somente para maiores de 12 anos.');
       return;
     }
     if (depSelfieBase64 && !aceiteLgpdDependente) {
@@ -311,9 +314,7 @@ export default function ModaisDependentes({
           className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-3 my-auto"
         >
           <h3 className="font-bold text-base text-grafite">Adicionar Dependente</h3>
-          <p className="text-[11px] text-gray-500">
-            Idade mínima de 12 anos. Você pode tirar a selfie agora ou adicionar depois em Gerenciar.
-          </p>
+
           <input
             type="text"
             required
@@ -322,25 +323,48 @@ export default function ModaisDependentes({
             onChange={(e) => setDepNome(formatarNomeTitleCase(e.target.value))}
             className="w-full p-2.5 border rounded-xl text-xs"
           />
+
           <div className="grid grid-cols-2 gap-2">
-            <input
-              type="text"
-              inputMode="numeric"
-              maxLength={14}
-              required
-              placeholder="000.000.000-00"
-              value={depCpf}
-              onChange={(e) => setDepCpf(formatarCPFVisual(e.target.value))}
-              className="w-full p-2.5 border rounded-xl text-xs"
-            />
-            <input
-              type="date"
-              required
-              value={depNascimento}
-              onChange={(e) => setDepNascimento(e.target.value)}
-              className="w-full p-2.5 border rounded-xl text-xs"
-            />
+            <div>
+              <label className="block text-[10px] font-bold text-gray-500 mb-1">CPF *</label>
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={14}
+                required
+                placeholder="000.000.000-00"
+                value={depCpf}
+                onChange={(e) => setDepCpf(formatarCPFVisual(e.target.value))}
+                className="w-full p-2.5 border rounded-xl text-xs"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold text-gray-500 mb-1">Nascimento *</label>
+              <input
+                type="date"
+                required
+                max={new Date().toISOString().split('T')[0]}
+                value={depNascimento}
+                onChange={(e) => {
+                  const novaData = e.target.value;
+                  setDepNascimento(novaData);
+                  if (novaData && novaData.split('-')[0]?.length === 4 && calcularIdade(novaData) < 12) {
+                    alert('O cadastro de dependente é permitido somente para maiores de 12 anos.');
+                  }
+                }}
+                className={`w-full p-2.5 border rounded-xl text-xs outline-none ${
+                  depMenorDe12 ? 'border-red-500 bg-red-50 text-red-900' : 'border-gray-200'
+                }`}
+              />
+            </div>
           </div>
+
+          {depMenorDe12 && (
+            <p className="text-[11px] font-bold text-red-600 bg-red-50 border border-red-200 px-2.5 py-1.5 rounded-lg">
+              ⚠️ Cadastro permitido somente para maiores de 12 anos.
+            </p>
+          )}
+
           <input
             type="password"
             inputMode="numeric"
@@ -400,8 +424,12 @@ export default function ModaisDependentes({
             </button>
             <button
               type="submit"
-              disabled={carregando}
-              className="bg-floresta text-white font-bold py-2.5 rounded-xl text-xs"
+              disabled={carregando || depMenorDe12}
+              className={`font-bold py-2.5 rounded-xl text-xs ${
+                depMenorDe12
+                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  : 'bg-floresta text-white'
+              }`}
             >
               {carregando ? 'Salvando...' : 'Salvar Dependente'}
             </button>

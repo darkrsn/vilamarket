@@ -34,11 +34,14 @@ export function formatarCPFVisual(valor: string): string {
 }
 
 export function calcularIdade(dataNascStr: string): number {
+  if (!dataNascStr) return 0;
+  const partes = dataNascStr.split('-').map(Number);
+  if (partes.length !== 3) return 0;
+  const [ano, mes, dia] = partes;
   const hoje = new Date();
-  const nasc = new Date(dataNascStr);
-  let idade = hoje.getFullYear() - nasc.getFullYear();
-  const m = hoje.getMonth() - nasc.getMonth();
-  if (m < 0 || (m === 0 && hoje.getDate() < nasc.getDate())) idade--;
+  let idade = hoje.getFullYear() - ano;
+  const m = hoje.getMonth() + 1 - mes;
+  if (m < 0 || (m === 0 && hoje.getDate() < dia)) idade--;
   return idade;
 }
 

@@ -36,6 +36,9 @@ export default function ModaisPerfil({
   const [novoPinTroca, setNovoPinTroca] = useState('');
   const [confirmarNovoPinTroca, setConfirmarNovoPinTroca] = useState('');
 
+  // Extrato detalhado
+  const [transacaoExpandidaId, setTransacaoExpandidaId] = useState<string | null>(null);
+
   async function salvarSelfieMorador() {
     if (!fotoCapturada || !usuarioLogado?.perfil_id) return;
     setCarregando(true);
@@ -243,34 +246,59 @@ export default function ModaisPerfil({
   if (modalAtivo === 'extrato') {
     return (
       <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4 max-h-[80vh] flex flex-col">
-          <h3 className="font-bold text-base text-grafite">Extrato de Transações & Cashback</h3>
-          <div className="overflow-y-auto space-y-2 flex-1">
+        <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4 max-h-[82vh] flex flex-col">
+          <h3 className="font-bold text-base text-grafite">Extrato Detalhado & Recibos</h3>
+          <div className="overflow-y-auto space-y-2.5 flex-1">
             {extratoLista.length === 0 ? (
               <p className="text-xs text-gray-500 text-center py-6">
                 Nenhuma transação registrada ainda.
               </p>
             ) : (
-              extratoLista.map((item) => (
-                <div
-                  key={item.id}
-                  className="flex justify-between items-center border-b pb-2 text-xs"
-                >
-                  <div>
-                    <p className="font-bold text-grafite">{item.descricao || item.tipo}</p>
-                    <p className="text-[10px] text-gray-400">
-                      {new Date(item.criado_em).toLocaleString('pt-BR')}
-                    </p>
+              extratoLista.map((item) => {
+                const temItens = Array.isArray(item.itens_json) && item.itens_json.length > 0;
+                const aberto = transacaoExpandidaId === item.id;
+                return (
+                  <div key={item.id} className="border rounded-xl p-2.5 text-xs space-y-1.5 bg-gray-50/70">
+                    <div
+                      onClick={() => temItens && setTransacaoExpandidaId(aberto ? null : item.id)}
+                      className={`flex justify-between items-center ${temItens ? 'cursor-pointer' : ''}`}
+                    >
+                      <div>
+                        <p className="font-bold text-grafite">{item.descricao || item.tipo}</p>
+                        <p className="text-[10px] text-gray-400">
+                          {new Date(item.criado_em).toLocaleString('pt-BR')}
+                          {temItens && ' • Toque para ver itens'}
+                        </p>
+                      </div>
+                      <span
+                        className={`font-bold ${
+                          Number(item.valor) >= 0 ? 'text-emerald-700' : 'text-red-600'
+                        }`}
+                      >
+                        R$ {Number(item.valor).toFixed(2)}
+                      </span>
+                    </div>
+
+                    {aberto && temItens && (
+                      <div className="pt-2 border-t border-gray-200 space-y-1 text-[11px] text-gray-700">
+                        {item.itens_json.map((prod: any, idx: number) => (
+                          <div key={idx} className="flex justify-between">
+                            <span>
+                              {prod.quantidade}x {prod.nome}
+                            </span>
+                            <span>R$ {(Number(prod.preco_unitario) * Number(prod.quantidade)).toFixed(2)}</span>
+                          </div>
+                        ))}
+                        {item.chave_nfce && (
+                          <p className="text-[10px] text-emerald-800 font-semibold pt-1">
+                            🧾 Recibo Digital / NFC-e: {item.chave_nfce}
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  <span
-                    className={`font-bold ${
-                      Number(item.valor) >= 0 ? 'text-emerald-700' : 'text-red-600'
-                    }`}
-                  >
-                    R$ {Number(item.valor).toFixed(2)}
-                  </span>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
           <button
