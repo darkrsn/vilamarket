@@ -97,8 +97,8 @@ export default function ModaisPerfil({
 
   if (modalAtivo === 'selfie') {
     return (
-      <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4">
+      <div className="fixed inset-0 !m-0 w-screen h-screen bg-black/70 z-50 flex items-center justify-center p-4 overflow-y-auto">
+        <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4 my-auto">
           <div className="flex items-center justify-between">
             <h3 className="font-bold text-base text-grafite">Minha Selfie (Acesso Facial)</h3>
             {temSelfie && !modoTrocaSelfie && (
@@ -186,10 +186,10 @@ export default function ModaisPerfil({
 
   if (modalAtivo === 'pin') {
     return (
-      <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+      <div className="fixed inset-0 !m-0 w-screen h-screen bg-black/70 z-50 flex items-center justify-center p-4 overflow-y-auto">
         <form
           onSubmit={salvarTrocaPinLogado}
-          className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-3"
+          className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-3 my-auto"
         >
           <h3 className="font-bold text-base text-grafite">Alterar PIN de 4 dígitos</h3>
           <input
@@ -245,8 +245,8 @@ export default function ModaisPerfil({
 
   if (modalAtivo === 'extrato') {
     return (
-      <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4 max-h-[82vh] flex flex-col">
+      <div className="fixed inset-0 !m-0 w-screen h-screen bg-black/70 z-50 flex items-center justify-center p-4 overflow-y-auto">
+        <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4 max-h-[82vh] flex flex-col my-auto">
           <h3 className="font-bold text-base text-grafite">Extrato Detalhado & Recibos</h3>
           <div className="overflow-y-auto space-y-2.5 flex-1">
             {extratoLista.length === 0 ? (

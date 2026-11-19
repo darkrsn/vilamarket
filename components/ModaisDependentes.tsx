@@ -308,7 +308,7 @@ export default function ModaisDependentes({
 
   if (modalAtivo === 'novo_dependente') {
     return (
-      <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
+      <div className="fixed inset-0 !m-0 w-screen h-screen bg-black/70 z-50 flex items-center justify-center p-4 overflow-y-auto">
         <form
           onSubmit={cadastrarDependente}
           className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-3 my-auto"
@@ -441,7 +441,7 @@ export default function ModaisDependentes({
 
   if (modalAtivo === 'gerenciar_dependente' && depGerenciando) {
     return (
-      <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
+      <div className="fixed inset-0 !m-0 w-screen h-screen bg-black/70 z-50 flex items-center justify-center p-4 overflow-y-auto">
         <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4 my-auto">
           <div>
             <h3 className="font-bold text-base text-grafite">{depGerenciando.nome_completo}</h3>
@@ -555,7 +555,7 @@ export default function ModaisDependentes({
   if (modalAtivo === 'pix_dependente' && dependenteSelecionado) {
     const pixCopiaECola = `00020126580014BR.GOV.BCB.PIX0136vilamarket-pix-${dependenteSelecionado.cpf}520400005303986540520.005802BR5910VILAMARKET6008CURITIBA62070503***6304ABCD`;
     return (
-      <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+      <div className="fixed inset-0 !m-0 w-screen h-screen bg-black/70 z-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4">
           <h3 className="font-bold text-base text-grafite">
             Enviar Saldo • {dependenteSelecionado.nome_completo}

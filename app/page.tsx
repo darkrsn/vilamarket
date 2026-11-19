@@ -279,8 +279,8 @@ export default function VilaMarketApp() {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4 pb-24 bg-gray-100">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-200">
-        <div className="bg-floresta p-6 text-white text-center">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-gray-200">
+        <div className="bg-floresta p-6 text-white text-center rounded-t-2xl">
           <h1 className="text-2xl font-bold tracking-tight">VilaMarket</h1>
           <p className="text-xs text-emerald-200 mt-1">Minimercado Autônomo • Vila Militar do Bacacheri</p>
         </div>
